@@ -1,6 +1,6 @@
 [project]
 name = "linkbert-pro"
-version = "1.0.0"
+version = "2.0.0"
 description = "LinkBERT Pro: Enterprise-grade SEO Internal & External Link Architecture, Graph Simulation, and Citation Intelligence Engine"
 readme = "README.md"
 license = { text = "MIT" }
@@ -14,6 +14,8 @@ keywords = [
   "internal-links",
   "link-building",
   "pagerank",
+  "hits",
+  "bm25f",
   "graph-theory",
   "nlp",
   "bert",

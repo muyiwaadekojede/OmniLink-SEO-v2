@@ -1,10 +1,11 @@
-"""Topic cluster detection, silo enforcement, and anchor diversity analysis.
+"""Topic cluster detection, Topic-Sensitive PageRank (Haveliwala 2002), silo enforcement, and anchor entropy.
 
 Implements:
-- Louvain Community Detection for automatic silo discovery
-- Topic-Sensitive PageRank (Haveliwala) with per-cluster bias vectors
-- Shannon Entropy calculation on anchor text distributions
-- Cannibalization Guard integration with Search Console data
+- Louvain, Label Propagation, URL Hierarchy, and Hybrid Semantic Community Detection
+- Topic-Sensitive PageRank (Haveliwala, WWW 2002) with per-cluster teleportation bias vectors
+- Shannon Entropy (Shannon 1948) calculation across combined existing + proposed anchor distributions
+- Automated Anchor Variation Generator for Penguin over-optimization remediation
+- Keyword Cannibalization & Striking Distance Intelligence from Search Console telemetry
 """
 
 from __future__ import annotations
@@ -13,7 +14,7 @@ import math
 import re
 from collections import Counter, defaultdict
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Set, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 import numpy as np
 
@@ -36,6 +37,7 @@ class AnchorProfile:
     exact_match_ratio: float          # fraction of anchors that are exact title match
     is_over_optimized: bool           # True if entropy < threshold or exact_match > 0.60
     recommendation: str               # human-readable guidance
+    suggested_variations: List[str] = field(default_factory=list)
 
 
 def compute_anchor_entropy(anchor_counts: Dict[str, int]) -> float:
@@ -51,71 +53,105 @@ def compute_anchor_entropy(anchor_counts: Dict[str, int]) -> float:
     return entropy
 
 
+def _generate_anchor_variations(page: Page, used_anchors: Set[str]) -> List[str]:
+    """Generates natural partial-match, topical, and contextual anchor variations for a target page."""
+    candidates: List[str] = []
+    clean_title = re.split(r"\s+[|\-–—:]\s+", page.title or "")[0].strip()
+    if clean_title:
+        candidates.append(f"{clean_title.lower()} guide")
+        candidates.append(f"complete {clean_title.lower()} overview")
+
+    if page.h1:
+        clean_h1 = re.split(r"\s+[|\-–—:]\s+", page.h1)[0].strip().lower()
+        if clean_h1 and clean_h1 not in used_anchors:
+            candidates.append(clean_h1)
+
+    for h in page.headings[:6]:
+        clean_h = re.split(r"\s+[|\-–—:]\s+", h)[0].strip().lower()
+        if 2 <= len(clean_h.split()) <= 5 and clean_h not in used_anchors:
+            candidates.append(clean_h)
+
+    slug_words = page.key.strip("/").split("/")[-1].replace("-", " ").replace("_", " ").strip().lower()
+    if slug_words and len(slug_words.split()) >= 2:
+        if slug_words not in used_anchors:
+            candidates.append(slug_words)
+        candidates.append(f"how {slug_words} works")
+
+    unique: List[str] = []
+    seen = set(used_anchors)
+    for c in candidates:
+        if c and c not in seen and len(c) >= 4:
+            seen.add(c)
+            unique.append(c)
+    return unique[:5]
+
+
 def analyze_anchor_diversity(
     idx: SiteIndex,
     proposed_links: List[Tuple[str, str, str]],  # [(source_key, target_key, anchor_text)]
     min_entropy: float = 1.5,
     max_exact_match_ratio: float = 0.60,
+    include_existing: bool = True,
 ) -> List[AnchorProfile]:
     """Analyze anchor text diversity for all target pages.
-    
-    Combines existing link anchors with proposed new anchors.
+
+    Combines existing body link anchors with proposed new anchors.
     Flags targets that are at risk of over-optimization (Google Penguin).
-    
-    Args:
-        idx: Site index
-        proposed_links: List of (source, target, anchor) tuples from recommendations
-        min_entropy: Minimum Shannon entropy threshold (bits). Below = over-optimized.
-        max_exact_match_ratio: Maximum fraction of anchors that can be exact title match.
-    
-    Returns:
-        List of AnchorProfile objects, one per target page with incoming links.
     """
-    # Collect existing anchors from current internal links
-    existing_anchors: Dict[str, Dict[str, int]] = defaultdict(lambda: defaultdict(int))
-    
-    for page in idx.pages:
-        from bs4 import BeautifulSoup
-        # If we have access to the raw source, extract anchor texts
-        # For now, we can only track proposed anchors
-        pass
-    
-    # Collect proposed anchors
-    proposed_anchors: Dict[str, Dict[str, int]] = defaultdict(lambda: defaultdict(int))
+    combined_anchors: Dict[str, Dict[str, int]] = defaultdict(lambda: defaultdict(int))
+
+    # 1. Collect existing body link anchors if present
+    if include_existing:
+        graph = LinkGraph(idx)
+        existing_map = graph.collect_existing_anchors()
+        for tgt_key, counts in existing_map.items():
+            for anc_txt, cnt in counts.items():
+                combined_anchors[tgt_key][anc_txt] += cnt
+
+    # 2. Collect proposed anchors
     for _, target_key, anchor in proposed_links:
         normalized = anchor.strip().lower()
-        proposed_anchors[target_key][normalized] += 1
-    
+        if normalized:
+            combined_anchors[target_key][normalized] += 1
+
     profiles = []
-    for target_key, anchors in proposed_anchors.items():
+    for target_key, anchors in combined_anchors.items():
+        if not anchors:
+            continue
         page = idx.by_key.get(target_key)
         if not page:
             continue
-        
+
         total = sum(anchors.values())
         entropy = compute_anchor_entropy(anchors)
-        
-        # Check exact match ratio
-        title_normalized = page.title.strip().lower()
-        h1_normalized = page.h1.strip().lower() if page.h1 else ""
+
+        # Check exact match ratio against cleaned title, full title, H1, or exact slug phrase
+        title_norm = page.title.strip().lower()
+        clean_title_norm = re.split(r"\s+[|\-–—:]\s+", title_norm)[0].strip()
+        h1_norm = page.h1.strip().lower() if page.h1 else ""
+        slug_norm = page.key.strip("/").split("/")[-1].replace("-", " ").strip().lower()
+
+        exact_targets = {t for t in (title_norm, clean_title_norm, h1_norm, slug_norm) if t}
         exact_count = 0
         for anchor_text, count in anchors.items():
-            if anchor_text == title_normalized or anchor_text == h1_normalized:
+            if anchor_text in exact_targets:
                 exact_count += count
-        
+
         exact_ratio = exact_count / total if total > 0 else 0.0
         is_over_optimized = entropy < min_entropy or exact_ratio > max_exact_match_ratio
-        
+        variations = _generate_anchor_variations(page, set(anchors.keys()))
+
         if is_over_optimized:
+            var_hint = f" Suggested alternatives: {', '.join(repr(v) for v in variations[:3])}." if variations else ""
             if exact_ratio > max_exact_match_ratio:
-                rec = (f"OVER-OPTIMIZED: {exact_ratio:.0%} of anchors are exact title match. "
-                       f"Diversify with partial-match, topical, and branded anchors.")
+                rec = (f"OVER-OPTIMIZED: {exact_ratio:.0%} of anchors match target title/slug. "
+                       f"Diversify with partial-match, topical, and branded anchors.{var_hint}")
             else:
                 rec = (f"LOW DIVERSITY: Anchor entropy is {entropy:.2f} bits (min {min_entropy}). "
-                       f"Add more varied anchor text to avoid algorithmic penalties.")
+                       f"Add more varied anchor text to avoid algorithmic penalties.{var_hint}")
         else:
             rec = f"HEALTHY: Entropy {entropy:.2f} bits, exact-match ratio {exact_ratio:.0%}."
-        
+
         profiles.append(AnchorProfile(
             target_key=target_key,
             target_title=page.title,
@@ -124,14 +160,15 @@ def analyze_anchor_diversity(
             exact_match_ratio=round(exact_ratio, 3),
             is_over_optimized=is_over_optimized,
             recommendation=rec,
+            suggested_variations=variations,
         ))
-    
-    profiles.sort(key=lambda p: p.entropy)
+
+    profiles.sort(key=lambda p: (not p.is_over_optimized, p.entropy))
     return profiles
 
 
 # ---------------------------------------------------------------------------
-# Topic Cluster Detection (Louvain Community Detection)
+# Topic Cluster Detection & Topic-Sensitive PageRank (Haveliwala 2002)
 # ---------------------------------------------------------------------------
 
 @dataclass
@@ -144,35 +181,74 @@ class TopicCluster:
     internal_edge_count: int       # links within cluster
     external_edge_count: int       # links leaving cluster
     cohesion_score: float          # internal/(internal+external) ratio
-    
+    topical_pagerank: Dict[str, float] = field(default_factory=dict)
+
+
+def compute_topic_sensitive_pagerank(
+    idx: SiteIndex,
+    clusters: List[TopicCluster],
+    damping: float = 0.85,
+) -> Dict[int, Dict[str, float]]:
+    """Computes Topic-Sensitive PageRank (Haveliwala, WWW 2002) for each detected topic cluster.
+
+    Biases random surfer teleportation jumps exclusively toward nodes belonging to cluster C_k,
+    measuring each page's topical authority relative to that specific domain silo.
+    """
+    graph = LinkGraph(idx, damping=damping)
+    adj = graph.build_adjacency()
+    n = len(idx.pages)
+    results: Dict[int, Dict[str, float]] = {}
+
+    if n == 0:
+        return results
+
+    for cluster in clusters:
+        bias = np.zeros(n, dtype=np.float32)
+        for pk in cluster.pages:
+            if pk in graph.key_to_idx:
+                bias[graph.key_to_idx[pk]] = 1.0
+        ts_pr = graph.compute_pagerank(adj, personalization=bias)
+        cluster_pr = {
+            idx.pages[i].key: round(float(ts_pr[i]), 4)
+            for i in range(n)
+            if idx.pages[i].key in cluster.pages
+        }
+        cluster.topical_pagerank = cluster_pr
+        results[cluster.cluster_id] = {
+            idx.pages[i].key: round(float(ts_pr[i]), 4) for i in range(n)
+        }
+
+    return results
+
 
 def detect_topic_clusters(
     idx: SiteIndex,
-    method: str = "url_hierarchy",  # "url_hierarchy" | "louvain" | "label_propagation"
+    method: str = "url_hierarchy",  # "url_hierarchy" | "louvain" | "label_propagation" | "hybrid"
 ) -> List[TopicCluster]:
-    """Detect topical silos using URL hierarchy or graph-based community detection.
-    
-    For small sites (< 50 pages), URL hierarchy is most reliable.
-    For larger sites, Louvain community detection discovers non-obvious clusters.
-    """
+    """Detect topical silos using URL hierarchy, graph modularity, or hybrid semantic clustering."""
     graph = LinkGraph(idx)
     adj = graph.build_adjacency()
     metrics = graph.analyze()
-    
+
     if method == "url_hierarchy":
-        return _cluster_by_url_hierarchy(idx, adj, metrics)
+        clusters = _cluster_by_url_hierarchy(idx, adj, metrics)
     elif method in ("louvain", "label_propagation"):
-        return _cluster_by_graph(idx, adj, metrics, method)
+        clusters = _cluster_by_graph(idx, adj, metrics, method)
+    elif method == "hybrid":
+        clusters = _cluster_hybrid(idx, adj, metrics)
     else:
-        return _cluster_by_url_hierarchy(idx, adj, metrics)
+        clusters = _cluster_by_url_hierarchy(idx, adj, metrics)
+
+    compute_topic_sensitive_pagerank(idx, clusters)
+    return clusters
 
 
 def _cluster_by_url_hierarchy(
     idx: SiteIndex, adj: np.ndarray, metrics: GraphMetrics
 ) -> List[TopicCluster]:
-    """Group pages by their first URL path segment."""
+    """Group pages by their primary URL path segment."""
     clusters_map: Dict[str, List[int]] = defaultdict(list)
-    
+
     for i, page in enumerate(idx.pages):
         parts = [p for p in page.key.strip("/").split("/") if p]
         if len(parts) >= 1:
@@ -180,45 +256,8 @@ def _cluster_by_url_hierarchy(
         else:
             prefix = "/"
         clusters_map[prefix].append(i)
-    
-    results = []
-    for cid, (prefix, page_indices) in enumerate(clusters_map.items()):
-        page_keys = [idx.pages[i].key for i in page_indices]
-        
-        # Calculate cohesion
-        internal_edges = 0
-        external_edges = 0
-        idx_set = set(page_indices)
-        for i in page_indices:
-            for j in range(len(idx.pages)):
-                if adj[i, j] > 0:
-                    if j in idx_set:
-                        internal_edges += 1
-                    else:
-                        external_edges += 1
-        
-        total = internal_edges + external_edges
-        cohesion = internal_edges / total if total > 0 else 0.0
-        
-        # Find hub (highest PageRank in cluster)
-        hub = max(page_keys, key=lambda k: metrics.page_rank.get(k, 0.0))
-        
-        # Name the cluster
-        hub_page = idx.by_key.get(hub)
-        name = hub_page.title[:50] if hub_page and hub_page.title else prefix
-        
-        results.append(TopicCluster(
-            cluster_id=cid,
-            name=name,
-            pages=page_keys,
-            hub_page=hub,
-            internal_edge_count=internal_edges,
-            external_edge_count=external_edges,
-            cohesion_score=round(cohesion, 3),
-        ))
-    
-    results.sort(key=lambda c: -len(c.pages))
-    return results
+
+    return _build_cluster_objects(idx, adj, metrics, list(clusters_map.values()), list(clusters_map.keys()))
 
 
 def _cluster_by_graph(
@@ -228,21 +267,19 @@ def _cluster_by_graph(
     try:
         import networkx as nx
     except ImportError:
-        # Fallback to URL hierarchy if networkx not available
         return _cluster_by_url_hierarchy(idx, adj, metrics)
-    
+
     G = nx.DiGraph()
-    for i, page in enumerate(idx.pages):
+    for page in idx.pages:
         G.add_node(page.key)
-    
+
     for i in range(len(idx.pages)):
         for j in range(len(idx.pages)):
             if adj[i, j] > 0 and i != j:
-                G.add_edge(idx.pages[i].key, idx.pages[j].key)
-    
-    # Convert to undirected for community detection
+                G.add_edge(idx.pages[i].key, idx.pages[j].key, weight=float(adj[i, j]))
+
     G_undirected = G.to_undirected()
-    
+
     if method == "louvain":
         try:
             from networkx.algorithms.community import louvain_communities
@@ -253,13 +290,69 @@ def _cluster_by_graph(
     else:
         from networkx.algorithms.community import label_propagation_communities
         communities = list(label_propagation_communities(G_undirected))
-    
-    results = []
-    for cid, community in enumerate(communities):
-        page_keys = list(community)
-        page_indices = [i for i, p in enumerate(idx.pages) if p.key in community]
+
+    key_to_idx = {p.key: i for i, p in enumerate(idx.pages)}
+    groups = [[key_to_idx[k] for k in comm if k in key_to_idx] for comm in communities]
+    return _build_cluster_objects(idx, adj, metrics, groups)
+
+
+def _cluster_hybrid(
+    idx: SiteIndex, adj: np.ndarray, metrics: GraphMetrics
+) -> List[TopicCluster]:
+    """Combines hyperlink adjacency, URL path affinity, and semantic vector similarity for Louvain."""
+    try:
+        import networkx as nx
+        from networkx.algorithms.community import louvain_communities
+    except ImportError:
+        return _cluster_by_url_hierarchy(idx, adj, metrics)
+
+    n = len(idx.pages)
+    G = nx.Graph()
+    for i in range(n):
+        G.add_node(i)
+
+    # Compute semantic similarity matrix if vectors available
+    sim_matrix = None
+    if idx.vectors is not None and len(idx.vectors) == n:
+        sim_matrix = idx.vectors @ idx.vectors.T
+
+    for i in range(n):
+        parts_i = [p for p in idx.pages[i].key.strip("/").split("/") if p]
+        prefix_i = parts_i[0] if parts_i else ""
+        for j in range(i + 1, n):
+            parts_j = [p for p in idx.pages[j].key.strip("/").split("/") if p]
+            prefix_j = parts_j[0] if parts_j else ""
+
+            w = 0.0
+            if adj[i, j] > 0 or adj[j, i] > 0:
+                w += float(adj[i, j] + adj[j, i]) * 1.5
+            if prefix_i and prefix_i == prefix_j:
+                w += 1.0
+            if sim_matrix is not None and sim_matrix[i, j] > 0.45:
+                w += float(sim_matrix[i, j]) * 0.8
+
+            if w > 0.35:
+                G.add_edge(i, j, weight=w)
+
+    communities = louvain_communities(G, weight="weight", seed=42)
+    groups = [ sorted(list(comm)) for comm in communities if comm ]
+    return _build_cluster_objects(idx, adj, metrics, groups)
+
+
+def _build_cluster_objects(
+    idx: SiteIndex,
+    adj: np.ndarray,
+    metrics: GraphMetrics,
+    groups: List[List[int]],
+    prefix_hints: Optional[List[str]] = None,
+) -> List[TopicCluster]:
+    results: List[TopicCluster] = []
+    for cid, page_indices in enumerate(groups):
+        if not page_indices:
+            continue
+        page_keys = [idx.pages[i].key for i in page_indices]
         idx_set = set(page_indices)
-        
+
         internal_edges = 0
         external_edges = 0
         for i in page_indices:
@@ -269,14 +362,15 @@ def _cluster_by_graph(
                         internal_edges += 1
                     else:
                         external_edges += 1
-        
+
         total = internal_edges + external_edges
         cohesion = internal_edges / total if total > 0 else 0.0
-        
+
         hub = max(page_keys, key=lambda k: metrics.page_rank.get(k, 0.0))
         hub_page = idx.by_key.get(hub)
-        name = hub_page.title[:50] if hub_page and hub_page.title else f"Cluster {cid}"
-        
+        default_name = prefix_hints[cid] if (prefix_hints and cid < len(prefix_hints)) else f"Cluster {cid}"
+        name = hub_page.title[:50] if hub_page and hub_page.title else default_name
+
         results.append(TopicCluster(
             cluster_id=cid,
             name=name,
@@ -286,8 +380,10 @@ def _cluster_by_graph(
             external_edge_count=external_edges,
             cohesion_score=round(cohesion, 3),
         ))
-    
+
     results.sort(key=lambda c: -len(c.pages))
+    for new_id, c in enumerate(results):
+        c.cluster_id = new_id
     return results
 
 
@@ -298,33 +394,30 @@ def _cluster_by_graph(
 def check_silo_violations(
     clusters: List[TopicCluster],
     proposed_links: List[Tuple[str, str, str]],  # (source, target, anchor)
-) -> List[Dict[str, str]]:
+) -> List[Dict[str, Any]]:
     """Flag proposed links that cross silo boundaries without hub mediation.
-    
+
     A cross-silo link is acceptable IF:
     - Source is the hub page of its cluster, OR
     - Target is the hub page of its cluster
-    
-    Otherwise it's a potential silo violation that weakens topical authority.
     """
     page_to_cluster: Dict[str, int] = {}
     hub_pages: Set[str] = set()
-    
+
     for cluster in clusters:
         for pk in cluster.pages:
             page_to_cluster[pk] = cluster.cluster_id
         hub_pages.add(cluster.hub_page)
-    
+
     violations = []
     for source, target, anchor in proposed_links:
         src_cluster = page_to_cluster.get(source)
         tgt_cluster = page_to_cluster.get(target)
-        
+
         if src_cluster is None or tgt_cluster is None:
             continue
-        
+
         if src_cluster != tgt_cluster:
-            # Cross-silo link detected
             if source not in hub_pages and target not in hub_pages:
                 violations.append({
                     "source": source,
@@ -339,12 +432,12 @@ def check_silo_violations(
                         f"to preserve topical authority."
                     ),
                 })
-    
+
     return violations
 
 
 # ---------------------------------------------------------------------------
-# Keyword Cannibalization Detection
+# Keyword Cannibalization & Striking Distance Intelligence
 # ---------------------------------------------------------------------------
 
 @dataclass
@@ -354,57 +447,67 @@ class CannibalizationIssue:
     competing_pages: List[Dict[str, Any]]  # [{page, clicks, impressions, position}]
     recommendation: str
     severity: str  # "critical" | "warning" | "info"
+    primary_page: str = ""
+    wasted_impressions: int = 0
 
 
 def detect_cannibalization(
-    search_console_rows: List[Dict[str, Any]],
+    search_console_rows: List[Any],
     min_impressions: int = 10,
 ) -> List[CannibalizationIssue]:
     """Detect keyword cannibalization from Search Console Performance data.
-    
+
     Cannibalization occurs when 2+ pages compete for the same query,
     splitting clicks and diluting ranking signals.
     """
     from .browser import SearchConsoleRow
-    
+
     query_pages: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
     for row in search_console_rows:
         if isinstance(row, SearchConsoleRow):
-            row = {"query": row.query, "page": row.page, "clicks": row.clicks,
-                   "impressions": row.impressions, "position": row.position}
-        
+            row = {
+                "query": row.query,
+                "page": row.page,
+                "clicks": row.clicks,
+                "impressions": row.impressions,
+                "position": row.position,
+            }
+
         if row.get("impressions", 0) < min_impressions:
             continue
         query_pages[row["query"]].append(row)
-    
+
     issues = []
     for query, pages in query_pages.items():
         if len(pages) < 2:
             continue
-        
-        pages_sorted = sorted(pages, key=lambda p: p.get("position", 999))
+
+        pages_sorted = sorted(pages, key=lambda p: (p.get("position", 999), -p.get("clicks", 0)))
         total_clicks = sum(p.get("clicks", 0) for p in pages_sorted)
-        
-        if total_clicks == 0:
+        secondary_imps = sum(p.get("impressions", 0) for p in pages_sorted[1:])
+
+        if total_clicks == 0 and secondary_imps < 50:
             severity = "info"
-        elif pages_sorted[0].get("position", 999) > 10:
-            severity = "critical"  # Both pages are outside top 10
+        elif pages_sorted[0].get("position", 999) > 10 or secondary_imps >= 200:
+            severity = "critical"
         else:
             severity = "warning"
-        
+
         best_page = pages_sorted[0]["page"]
         rec = (
-            f"Query '{query}' has {len(pages)} competing pages. "
-            f"Consolidate ranking signals to {best_page} (position {pages_sorted[0].get('position', '?'):.1f}). "
-            f"Link from secondary pages TO the primary page using this query as anchor text."
+            f"Query '{query}' has {len(pages)} competing pages ({secondary_imps} secondary impressions split). "
+            f"Consolidate ranking signals to {best_page} (position {pages_sorted[0].get('position', 0.0):.1f}). "
+            f"Link from secondary pages TO the primary page using '{query}' as anchor text."
         )
-        
+
         issues.append(CannibalizationIssue(
             query=query,
             competing_pages=pages_sorted,
             recommendation=rec,
             severity=severity,
+            primary_page=best_page,
+            wasted_impressions=secondary_imps,
         ))
-    
-    issues.sort(key=lambda i: {"critical": 0, "warning": 1, "info": 2}[i.severity])
+
+    issues.sort(key=lambda i: ({"critical": 0, "warning": 1, "info": 2}[i.severity], -i.wasted_impressions))
     return issues

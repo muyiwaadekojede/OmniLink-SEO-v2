@@ -1,12 +1,12 @@
-"""External Link Intelligence and Authority Citation Discovery Engine.
+"""External Link Intelligence, Multi-Vertical Authority Ontology, and E-E-A-T Citation Engine.
 
 Engineered under the Peer-Reviewed Scientific Link Architecture Framework:
 1. TrustRank & Seed Set Proximity (Gyöngyi, Garcia-Molina, Pedersen 2004 - Stanford/ACM VLDB)
 2. Kleinberg HITS Hub & Authority Formulations (Kleinberg 1999 - ACM JACM)
 3. Reasonable Surfer Outbound Weighting (Google Patent US7716254B2)
 4. Information Gain and Factual Grounding (Google Patent US20220277089A1)
-5. Google Search Quality Evaluator Guidelines (2024-2025, Sections 2.5-5.4)
-6. PageRank Leakage Prevention & Outbound Link Budgeting
+5. Google Search Quality Evaluator Guidelines (2024-2026, Sections 2.5-5.4)
+6. PageRank Leakage Prevention, Outbound Link Budgeting & Existing Link Security Auditing
 """
 
 from __future__ import annotations
@@ -17,13 +17,13 @@ import math
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, List, Optional, Set, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 from .site import Page, SiteIndex
 
 
 # =======================================================================
-# AUTHORITY ONTOLOGY & TRUST TIERS (TrustRank Seed Set Proximity)
+# MULTI-INDUSTRY AUTHORITY ONTOLOGY & TRUST TIERS (TrustRank Seed Sets)
 # =======================================================================
 
 @dataclass(frozen=True)
@@ -39,7 +39,9 @@ class AuthorityTarget:
 
 
 AUTHORITY_REGISTRY: List[AuthorityTarget] = [
-    # Tier 1: International Standards, Protocols, Official Documentation & Governing Bodies
+    # -------------------------------------------------------------------
+    # Vertical 1: Web Standards, Protocols & Core Engineering (Tier 1)
+    # -------------------------------------------------------------------
     AuthorityTarget(
         pattern=r"\b(W3C|World Wide Web Consortium)\b",
         target_url="https://www.w3.org/",
@@ -86,6 +88,15 @@ AUTHORITY_REGISTRY: List[AuthorityTarget] = [
         academic_basis="Official Search Engine Documentation & Crawler Guidelines",
     ),
     AuthorityTarget(
+        pattern=r"\b(Bing Webmaster Guidelines)\b",
+        target_url="https://www.bing.com/webmasters/help/webmaster-guidelines-30fba23a",
+        target_title="Microsoft Bing Webmaster Guidelines",
+        trust_tier=1,
+        category="standards_protocol",
+        domain="bing.com",
+        academic_basis="Official Microsoft Bing Search Indexing & Quality Specifications",
+    ),
+    AuthorityTarget(
         pattern=r"\b(IETF|RFC \d+|RFC\d+)\b",
         target_url="https://www.ietf.org/",
         target_title="Internet Engineering Task Force (IETF)",
@@ -94,8 +105,19 @@ AUTHORITY_REGISTRY: List[AuthorityTarget] = [
         domain="ietf.org",
         academic_basis="Internet Engineering Task Force Technical Standards",
     ),
+    AuthorityTarget(
+        pattern=r"\b(WCAG|Web Content Accessibility Guidelines)\b",
+        target_url="https://www.w3.org/WAI/standards-guidelines/wcag/",
+        target_title="W3C Web Content Accessibility Guidelines (WCAG)",
+        trust_tier=1,
+        category="standards_protocol",
+        domain="w3.org",
+        academic_basis="W3C International Accessibility Technical Standard",
+    ),
 
-    # Tier 2: Empirical Repositories, Telemetry, and Industry Telemetry Benchmarks
+    # -------------------------------------------------------------------
+    # Vertical 2: Empirical Web Telemetry & Benchmarks (Tier 1-2)
+    # -------------------------------------------------------------------
     AuthorityTarget(
         pattern=r"\b(HTTP Archive|Web Almanac)\b",
         target_url="https://almanac.httparchive.org/",
@@ -133,6 +155,24 @@ AUTHORITY_REGISTRY: List[AuthorityTarget] = [
         academic_basis="Aggregated Market Research & Industry Telemetry",
     ),
     AuthorityTarget(
+        pattern=r"\b(StatCounter)\b",
+        target_url="https://gs.statcounter.com/",
+        target_title="StatCounter GlobalStats Web Telemetry",
+        trust_tier=2,
+        category="empirical_data",
+        domain="statcounter.com",
+        academic_basis="Global Web Traffic & Market Share Telemetry across 5B+ Pageviews",
+    ),
+    AuthorityTarget(
+        pattern=r"\b(Pew Research Center|Pew Research)\b",
+        target_url="https://www.pewresearch.org/",
+        target_title="Pew Research Center Nonpartisan Fact Tank",
+        trust_tier=2,
+        category="empirical_data",
+        domain="pewresearch.org",
+        academic_basis="Primary Demographic, Polling, and Digital Adoption Research",
+    ),
+    AuthorityTarget(
         pattern=r"\b(PageSpeed Insights|Lighthouse)\b",
         target_url="https://pagespeed.web.dev/",
         target_title="Google PageSpeed Insights & Lighthouse",
@@ -142,7 +182,9 @@ AUTHORITY_REGISTRY: List[AuthorityTarget] = [
         academic_basis="Automated Open-Source Tool for Auditing Web Quality & Speed",
     ),
 
-    # Tier 3: Patent, Regulatory, Clinical & Academic Authorities
+    # -------------------------------------------------------------------
+    # Vertical 3: Patents, Academic Repositories & AI/ML (Tier 1-3)
+    # -------------------------------------------------------------------
     AuthorityTarget(
         pattern=r"\b(Google Patents?|US\s?Patent|patent search)\b",
         target_url="https://patents.google.com/",
@@ -162,6 +204,33 @@ AUTHORITY_REGISTRY: List[AuthorityTarget] = [
         academic_basis="Open-Access Repository for 2M+ Scholarly Articles in Computer Science",
     ),
     AuthorityTarget(
+        pattern=r"\b(IEEE Xplore|IEEE)\b",
+        target_url="https://ieeexplore.ieee.org/",
+        target_title="IEEE Xplore Digital Library",
+        trust_tier=1,
+        category="academic_research",
+        domain="ieee.org",
+        academic_basis="Institute of Electrical and Electronics Engineers Peer-Reviewed Archive",
+    ),
+    AuthorityTarget(
+        pattern=r"\b(ACM Digital Library)\b",
+        target_url="https://dl.acm.org/",
+        target_title="Association for Computing Machinery (ACM) Digital Library",
+        trust_tier=1,
+        category="academic_research",
+        domain="acm.org",
+        academic_basis="Primary Computer Science & Information Retrieval Research Repository",
+    ),
+    AuthorityTarget(
+        pattern=r"\b(Hugging Face)\b",
+        target_url="https://huggingface.co/",
+        target_title="Hugging Face Open AI & Transformer Model Hub",
+        trust_tier=2,
+        category="academic_research",
+        domain="huggingface.co",
+        academic_basis="Global Open-Source Repository for Pretrained NLP & Transformer Models",
+    ),
+    AuthorityTarget(
         pattern=r"\b(Wikipedia|Wikimedia)\b",
         target_url="https://www.wikipedia.org/",
         target_title="Wikipedia The Free Encyclopedia",
@@ -171,7 +240,98 @@ AUTHORITY_REGISTRY: List[AuthorityTarget] = [
         academic_basis="Crowdsourced Fact-Checked Knowledge Graph Baseline",
     ),
 
-    # Tier 4: High-Trust Industry Standard Publications (Non-Competing)
+    # -------------------------------------------------------------------
+    # Vertical 4: Cybersecurity, Privacy & Regulatory Compliance (Tier 1)
+    # -------------------------------------------------------------------
+    AuthorityTarget(
+        pattern=r"\b(OWASP|OWASP Top 10)\b",
+        target_url="https://owasp.org/",
+        target_title="Open Worldwide Application Security Project (OWASP)",
+        trust_tier=1,
+        category="standards_protocol",
+        domain="owasp.org",
+        academic_basis="Global Web Application Security Standards & Vulnerability Taxonomy",
+    ),
+    AuthorityTarget(
+        pattern=r"\b(NIST|National Institute of Standards and Technology)\b",
+        target_url="https://www.nist.gov/cyberframework",
+        target_title="NIST Cybersecurity & Technical Standards Framework",
+        trust_tier=1,
+        category="patent_regulatory",
+        domain="nist.gov",
+        academic_basis="U.S. Department of Commerce Federal Technology Standards Body",
+    ),
+    AuthorityTarget(
+        pattern=r"\b(GDPR|General Data Protection Regulation)\b",
+        target_url="https://gdpr.eu/",
+        target_title="EU General Data Protection Regulation (GDPR) Official Portal",
+        trust_tier=1,
+        category="patent_regulatory",
+        domain="gdpr.eu",
+        academic_basis="European Union Statutory Data Privacy & Protection Law",
+    ),
+
+    # -------------------------------------------------------------------
+    # Vertical 5: Healthcare, Life Sciences & Veterinary Medicine (Tier 1)
+    # -------------------------------------------------------------------
+    AuthorityTarget(
+        pattern=r"\b(World Health Organization|WHO)\b",
+        target_url="https://www.who.int/",
+        target_title="World Health Organization (WHO)",
+        trust_tier=1,
+        category="patent_regulatory",
+        domain="who.int",
+        academic_basis="United Nations Global Public Health & Clinical Authority",
+    ),
+    AuthorityTarget(
+        pattern=r"\b(PubMed|National Library of Medicine|NCBI)\b",
+        target_url="https://pubmed.ncbi.nlm.nih.gov/",
+        target_title="PubMed National Center for Biotechnology Information (NCBI)",
+        trust_tier=1,
+        category="academic_research",
+        domain="ncbi.nlm.nih.gov",
+        academic_basis="U.S. National Institutes of Health Biomedical Literature Archive",
+    ),
+    AuthorityTarget(
+        pattern=r"\b(AVMA|American Veterinary Medical Association)\b",
+        target_url="https://www.avma.org/",
+        target_title="American Veterinary Medical Association (AVMA)",
+        trust_tier=1,
+        category="patent_regulatory",
+        domain="avma.org",
+        academic_basis="Accredited Veterinary Clinical & Animal Welfare Guidelines",
+    ),
+
+    # -------------------------------------------------------------------
+    # Vertical 6: Finance, Macroeconomics & E-Commerce UX (Tier 1-4)
+    # -------------------------------------------------------------------
+    AuthorityTarget(
+        pattern=r"\b(U\.S\. Securities and Exchange Commission|SEC filings?)\b",
+        target_url="https://www.sec.gov/",
+        target_title="U.S. Securities and Exchange Commission (SEC)",
+        trust_tier=1,
+        category="patent_regulatory",
+        domain="sec.gov",
+        academic_basis="Federal Financial Regulatory Authority & EDGAR Filings",
+    ),
+    AuthorityTarget(
+        pattern=r"\b(Bureau of Labor Statistics|BLS)\b",
+        target_url="https://www.bls.gov/",
+        target_title="U.S. Bureau of Labor Statistics (BLS)",
+        trust_tier=1,
+        category="empirical_data",
+        domain="bls.gov",
+        academic_basis="Official U.S. Macroeconomic & Employment Telemetry",
+    ),
+    AuthorityTarget(
+        pattern=r"\b(Baymard Institute)\b",
+        target_url="https://baymard.com/",
+        target_title="Baymard Institute E-Commerce UX Research",
+        trust_tier=2,
+        category="empirical_data",
+        domain="baymard.com",
+        academic_basis="Large-Scale Empirical E-Commerce Checkout & Usability Research",
+    ),
     AuthorityTarget(
         pattern=r"\b(Search Engine Land)\b",
         target_url="https://searchengineland.com/",
@@ -264,7 +424,7 @@ def _extract_exact_sentence(text: str, anchor: str) -> Optional[str]:
 
 def resolve_empirical_target(claim_anchor: str, sentence: str) -> Optional[Tuple[str, str, str, int, str, str]]:
     """Resolves an empirical claim to a verified primary source. Zero placeholders (#citation-needed).
-    
+
     Returns (target_url, target_title, target_domain, trust_tier, category, academic_basis) or None.
     """
     clean_anchor = claim_anchor.lower()
@@ -355,6 +515,39 @@ def resolve_empirical_target(claim_anchor: str, sentence: str) -> Optional[Tuple
             "Official Search Engine Documentation & Crawler Guidelines",
         )
 
+    # 8. E-Commerce Cart Abandonment & Checkout UX (Baymard Institute)
+    if any(k in clean_sent for k in ("cart abandonment", "checkout", "online shoppers")):
+        return (
+            "https://baymard.com/lists/cart-abandonment-rate",
+            "Baymard Institute E-Commerce Cart Abandonment Telemetry",
+            "baymard.com",
+            2,
+            "empirical_data",
+            "Baymard Aggregate Analysis of 49+ E-Commerce Cart Abandonment Studies",
+        )
+
+    # 9. Veterinary & Pet Care Health Claims (AVMA)
+    if any(k in clean_sent for k in ("veterinary", "senior pets", "pet owners", "dogs and cats", "canine", "feline")):
+        return (
+            "https://www.avma.org/resources-tools/pet-owners/petcare",
+            "American Veterinary Medical Association (AVMA) Pet Care Guidelines",
+            "avma.org",
+            1,
+            "patent_regulatory",
+            "AVMA Evidence-Based Veterinary Clinical Care Standards",
+        )
+
+    # 10. Cybersecurity & Vulnerability Claims (OWASP / NIST)
+    if any(k in clean_sent for k in ("cyberattack", "data breach", "vulnerability", "sql injection", "xss")):
+        return (
+            "https://owasp.org/www-project-top-ten/",
+            "OWASP Top 10 Web Application Security Risks",
+            "owasp.org",
+            1,
+            "standards_protocol",
+            "OWASP Global Application Security Benchmark",
+        )
+
     # No verified primary source found in ontology -> Return None (Zero Placeholders Guarantee)
     return None
 
@@ -405,13 +598,14 @@ class ExternalLinkOpportunity:
 
 class ExternalLinkEngine:
     """Industrial-grade External Authority Citation & E-E-A-T Intelligence Engine.
-    
+
     Implements:
-    - TrustRank seed set proximity mapping (Tiers 1-4)
+    - TrustRank seed set proximity mapping (Tiers 1-4) across 10 industry verticals
     - Kleinberg Hub & Authority scoring
     - Reasonable Surfer contextual anchor placement
     - SERP competitor leak prevention
     - Outbound link budgeting to prevent PageRank bleeding
+    - Existing external link security & protocol auditing
     """
 
     def __init__(
@@ -448,9 +642,8 @@ class ExternalLinkEngine:
 
         # Calculate word count to establish Outbound Link Budget
         total_words = sum(len(b.text.split()) for b in page.blocks)
-        
+
         # Scientific Outbound Link Budget: 1 external citation per 250-350 words, max 6 per page
-        # For thin pages (< 300 words), external outlinks are restricted to 1 to prevent PageRank bleeding.
         if max_external_budget is None:
             max_budget = max(1, min(6, total_words // 250))
         else:
@@ -490,8 +683,15 @@ class ExternalLinkEngine:
                     if anchor.lower() in seen_anchors:
                         continue
 
-                    # Validate that anchor is not a generic stopword
-                    if len(anchor) < 2 or anchor.lower() in ("here", "website", "link", "source"):
+                    # Short acronyms (<= 4 chars, e.g. WHO, SEC, BLS, ACM, CLS, INP) must be uppercase in source text
+                    # so lowercase English words like "who" never collide with acronyms like "WHO".
+                    if len(anchor) <= 4 and anchor.isalpha() and not anchor.isupper():
+                        continue
+
+                    if len(anchor) < 2 or anchor.lower() in (
+                        "here", "website", "link", "source", "who", "whom", "whose",
+                        "which", "what", "where", "when", "why", "how", "this", "that",
+                    ):
                         continue
 
                     sentence = _extract_exact_sentence(text, anchor)
@@ -609,6 +809,46 @@ class ExternalLinkEngine:
 
         # Enforce Outbound Link Budget to prevent PageRank dilution
         return opps[:max_budget]
+
+    def audit_existing_external_links(self, idx: SiteIndex) -> List[Dict[str, Any]]:
+        """Audits existing outbound external links across the site for protocol, rel security, and competitor leaks."""
+        findings: List[Dict[str, Any]] = []
+        for page in idx.pages:
+            ext_count = 0
+            for ld in getattr(page, "link_details", []):
+                if not ld.is_external:
+                    continue
+                ext_count += 1
+                href = ld.href
+                domain = re.sub(r"^https?://(www\.)?", "", href).split("/")[0].lower()
+                if href.startswith("http://"):
+                    findings.append({
+                        "source_page": page.key,
+                        "href": href,
+                        "anchor": ld.anchor,
+                        "issue": "INSECURE_HTTP",
+                        "severity": "warning",
+                        "recommendation": f"Upgrade external link '{href}' to HTTPS.",
+                    })
+                if domain in self.competitor_domains:
+                    findings.append({
+                        "source_page": page.key,
+                        "href": href,
+                        "anchor": ld.anchor,
+                        "issue": "COMPETITOR_LEAK",
+                        "severity": "critical",
+                        "recommendation": f"Remove or rel='nofollow' outbound link to SERP competitor '{domain}'.",
+                    })
+            if ext_count > 15:
+                findings.append({
+                    "source_page": page.key,
+                    "href": "*",
+                    "anchor": f"{ext_count} external links",
+                    "issue": "EXCESSIVE_OUTLINKS",
+                    "severity": "warning",
+                    "recommendation": f"Page contains {ext_count} external outlinks, risking PageRank dilution.",
+                })
+        return findings
 
     def export_csv(self, opportunities: List[ExternalLinkOpportunity], output_path: Path) -> None:
         """Exports external linking opportunities to a clean, structured CSV."""

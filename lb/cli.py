@@ -1,15 +1,14 @@
-"""LinkGraph Pro CLI — Full-Spectrum SEO Link Architecture, Graph Intelligence & Automated Optimization.
+"""LinkBERT Pro CLI — Full-Spectrum SEO Link Architecture, Graph Intelligence & Automated Optimization.
 
 Powered by:
-- Calibrated LinkBERT Neural Token Classifier (adaptive paragraph-level quantile scoring)
-- Hybrid Tri-Engine Discovery (Direct Mention + LinkBERT + Semantic Conceptual)
-- Internal PageRank & Link Equity Simulation (Markov chain power iteration)
-- Topic Cluster Detection & Silo Enforcement (URL hierarchy + Louvain community detection)
-- Anchor Diversity & Shannon Entropy Guard (anti-Penguin over-optimization detection)
-- AST-Safe Application & Rollback Engine (HTML + Markdown + MDX with atomic .bak backups)
-- External Citation & E-E-A-T Authority Matcher (entity grounding + SERP competitor guard)
-- BrowserOS Neo Integration (rendered DOM, Google Search Console, live SERP verification)
-- Keyword Cannibalization Detection (Search Console query-to-URL conflict matrix)
+- Calibrated LinkBERT Neural Token Classifier (batched sliding-window inference & compound boundary snapping)
+- Hybrid Quad-Engine Discovery (Direct Mention + GSC Striking Distance + LinkBERT + BM25F + Dense Vectors)
+- Reasonable Surfer PageRank, Kleinberg HITS, Click Depth & Brandes Betweenness Centrality
+- Topic Cluster Detection, Topic-Sensitive PageRank (Haveliwala 2002) & Silo Enforcement
+- Anchor Diversity & Shannon Entropy Guard (anti-Penguin over-optimization detection & variation generator)
+- AST-Safe Application & Rollback Engine (HTML + Markdown + MDX + JSX/TSX with atomic .bak backups)
+- External Citation & Multi-Vertical E-E-A-T Authority Matcher (10 verticals, 60+ TrustRank seed authorities)
+- Automated 6-Specialist Quality Gate (`linkbert verify`)
 """
 
 from __future__ import annotations
@@ -41,6 +40,7 @@ from .graph import LinkGraph
 from .model import LinkPredictor
 from .report import write_all
 from .site import Page, SiteIndex, build
+from .verify import audit_workbook
 
 DEFAULT_INDEX = ".linkbert"
 
@@ -77,10 +77,9 @@ def cmd_scan(args) -> None:
     if idx.pages:
         print(f"    Sample: {idx.pages[0].key}  ({idx.pages[0].title[:60]})")
 
-    # Run initial graph analysis
     graph = LinkGraph(idx)
     metrics = graph.analyze()
-    print(f"[+] Graph Topology: {len(metrics.orphan_pages)} orphan pages detected, {len(metrics.clusters)} clusters.")
+    print(f"[+] Graph Topology: {len(metrics.orphan_pages)} orphan pages, {len(metrics.dead_end_pages)} dead-ends, {len(metrics.clusters)} clusters.")
 
 
 def cmd_analyze(args) -> None:
@@ -123,7 +122,28 @@ def cmd_suggest(args) -> None:
     load_bert = (args.mode in {"hybrid", "linkbert"})
     pred = _predictor(args, load_weights=load_bert) if load_bert else None
 
-    engine = HybridDiscoveryEngine(idx, predictor=pred)
+    # Load GSC queries BEFORE initializing HybridDiscoveryEngine so striking-distance queries fuel discovery
+    gsc_queries = []
+    gsc_file = getattr(args, "gsc", None)
+    if not gsc_file:
+        candidate_gsc = _index_path(args.index) / "gsc_performance.csv"
+        if candidate_gsc.exists():
+            gsc_file = str(candidate_gsc)
+        elif Path("tests/muyiwa_gsc_performance.csv").exists() and "muyiwa" in str(_index_path(args.index)):
+            gsc_file = "tests/muyiwa_gsc_performance.csv"
+    if gsc_file and Path(gsc_file).exists():
+        from .browser import parse_search_console_csv
+        sc_rows = parse_search_console_csv(Path(gsc_file).read_text(encoding="utf-8", errors="ignore"))
+        gsc_queries = [{
+            "query": r.query,
+            "page": r.page,
+            "clicks": r.clicks,
+            "impressions": r.impressions,
+            "ctr": f"{r.ctr*100:.1f}%" if isinstance(r.ctr, float) and r.ctr < 1 else str(r.ctr),
+            "position": r.position,
+        } for r in sc_rows]
+
+    engine = HybridDiscoveryEngine(idx, predictor=pred, gsc_queries=gsc_queries)
 
     pages = idx.pages
     if args.page:
@@ -161,39 +181,17 @@ def cmd_suggest(args) -> None:
         print("[*] Re-ranking candidates with neural cross-encoder...", file=sys.stderr)
         all_opps = engine.rerank_with_cross_encoder(all_opps)
 
-    # Calculate LinkGraph metrics with projected PageRank
     proposed_pairs = [(o.source_key, o.target_key) for o in all_opps]
     graph = LinkGraph(idx)
     metrics = graph.analyze(additional_links=proposed_pairs)
-
-    # Load GSC queries if provided or auto-discovered
-    gsc_queries = []
-    gsc_file = getattr(args, "gsc", None)
-    if not gsc_file:
-        candidate_gsc = _index_path(args.index) / "gsc_performance.csv"
-        if candidate_gsc.exists():
-            gsc_file = str(candidate_gsc)
-        elif Path("tests/muyiwa_gsc_performance.csv").exists() and "muyiwa" in str(_index_path(args.index)):
-            gsc_file = "tests/muyiwa_gsc_performance.csv"
-    if gsc_file and Path(gsc_file).exists():
-        from .browser import parse_search_console_csv
-        sc_rows = parse_search_console_csv(Path(gsc_file).read_text(encoding="utf-8", errors="ignore"))
-        gsc_queries = [{
-            "query": r.query,
-            "page": r.page,
-            "clicks": r.clicks,
-            "impressions": r.impressions,
-            "ctr": f"{r.ctr*100:.1f}%" if isinstance(r.ctr, float) and r.ctr < 1 else str(r.ctr),
-            "position": r.position,
-        } for r in sc_rows]
 
     stats = write_all(_index_path(args.index), idx, all_opps, metrics=metrics, gsc_queries=gsc_queries)
     dt = time.time() - t0
 
     print(f"\n[+] {stats['opportunities']} internal link opportunities generated across {len(pages)} pages in {dt:.1f}s")
     print(f"[+] {stats.get('external_opportunities', 0)} external authority citations discovered")
-    print(f"[+] Interactive Visual Dashboard: {stats['report']}")
-    print(f"[+] Multi-Tab Excel Master Workbook: {stats.get('excel')}")
+    print(f"[+] Interactive 5-Tab Visual Dashboard: {stats['report']}")
+    print(f"[+] 6-Tab Excel Master Workbook: {stats.get('excel')}")
     print(f"[+] Internal Links CSV: {stats.get('internal_csv')}")
     print(f"[+] External Citations CSV: {stats.get('external_csv')}")
     print(f"[+] Full JSON Dataset: {stats['json']}")
@@ -225,7 +223,6 @@ def cmd_apply(args) -> None:
 
         src_file = item.get("source_file")
         if not src_file:
-            # Match to index page
             page = idx.by_key.get(src_key)
             if page:
                 src_file = page.source
@@ -293,20 +290,29 @@ def cmd_graph(args) -> None:
     if args.json:
         print(json.dumps({
             "page_rank": metrics.page_rank,
+            "click_depth": metrics.click_depth,
+            "hub_scores": metrics.hub_scores,
+            "authority_scores": metrics.authority_scores,
+            "betweenness_centrality": metrics.betweenness_centrality,
             "in_degrees": metrics.in_degrees,
             "out_degrees": metrics.out_degrees,
             "orphan_pages": metrics.orphan_pages,
             "under_linked_pages": metrics.under_linked_pages,
+            "dead_end_pages": metrics.dead_end_pages,
             "clusters": metrics.clusters,
         }, indent=2))
         return
 
-    print("\n--- Site Internal PageRank Rankings (Top 15) ---")
+    print("\n--- Site Internal PageRank, Click Depth & Kleinberg HITS (Top 15) ---")
     sorted_pr = sorted(metrics.page_rank.items(), key=lambda kv: -kv[1])
     for key, pr in sorted_pr[:15]:
         in_d = metrics.in_degrees.get(key, 0)
         out_d = metrics.out_degrees.get(key, 0)
-        print(f"  {pr:>6.3f} PR | In: {in_d:>2} | Out: {out_d:>2} | {key}")
+        cd = metrics.click_depth.get(key, 0)
+        cd_s = f"{cd:>2}d" if cd < 999 else "INF"
+        auth = metrics.authority_scores.get(key, 0.0)
+        hub = metrics.hub_scores.get(key, 0.0)
+        print(f"  {pr:>6.3f} PR | Depth: {cd_s} | Auth: {auth:.2f} | Hub: {hub:.2f} | In: {in_d:>2} Out: {out_d:>2} | {key}")
 
     print(f"\n--- Orphan Pages ({len(metrics.orphan_pages)}) ---")
     for key in metrics.orphan_pages:
@@ -353,13 +359,15 @@ def cmd_gaps(args) -> None:
     graph = LinkGraph(idx)
     metrics = graph.analyze()
 
-    print(f"\n{'Inbound':>8} {'PR':>6}  {'Page':<50} Title")
+    print(f"\n{'Inbound':>8} {'PR':>6} {'Depth':>6}  {'Page':<48} Title")
     sorted_pages = sorted(idx.pages, key=lambda p: (metrics.in_degrees.get(p.key, 0), -p.words))
     for p in sorted_pages[: args.top]:
         in_d = metrics.in_degrees.get(p.key, 0)
         pr = metrics.page_rank.get(p.key, 1.0)
+        cd = metrics.click_depth.get(p.key, 0)
+        cd_s = f"{cd}d" if cd < 999 else "INF"
         flag = "[ORPHAN]" if in_d == 0 and p.key != "/" else "        "
-        print(f"{flag} {in_d:>3} {pr:>6.2f}  {p.key[:50]:<50} {p.title[:40]}")
+        print(f"{flag} {in_d:>3} {pr:>6.2f} {cd_s:>6}  {p.key[:48]:<48} {p.title[:40]}")
 
 
 def cmd_doctor(args) -> None:
@@ -367,7 +375,7 @@ def cmd_doctor(args) -> None:
     import torch
     import transformers
 
-    print(f"LinkGraph Pro v{__version__}")
+    print(f"LinkBERT Pro v{__version__}")
     print(f"Python      {sys.version.split()[0]}")
     print(f"PyTorch     {torch.__version__}  (CUDA: {torch.cuda.is_available()})")
     if torch.cuda.is_available():
@@ -376,8 +384,7 @@ def cmd_doctor(args) -> None:
     print(f"SentenceTransformers {sentence_transformers.__version__}")
     print(f"Index Path  {_index_path(args.index)}")
 
-    # Check for new modules
-    modules = ["lb.browser", "lb.intelligence", "lb.orchestrator"]
+    modules = ["lb.browser", "lb.intelligence", "lb.orchestrator", "lb.verify"]
     for mod in modules:
         try:
             __import__(mod)
@@ -387,7 +394,7 @@ def cmd_doctor(args) -> None:
 
 
 def cmd_clusters(args) -> None:
-    """Detect and display topic clusters (silos) in the site."""
+    """Detect and display topic clusters (silos) and Topic-Sensitive PageRank in the site."""
     idx = _load(args.index)
     from .intelligence import detect_topic_clusters
 
@@ -402,10 +409,11 @@ def cmd_clusters(args) -> None:
             "cohesion_score": c.cohesion_score,
             "internal_edges": c.internal_edge_count,
             "external_edges": c.external_edge_count,
+            "topical_pagerank": c.topical_pagerank,
         } for c in clusters], indent=2))
         return
 
-    print(f"\n--- Topic Clusters ({len(clusters)} detected) ---\n")
+    print(f"\n--- Topic Clusters & Topic-Sensitive PageRank ({len(clusters)} detected) ---\n")
     for c in clusters:
         cohesion_label = "STRONG" if c.cohesion_score > 0.6 else ("MODERATE" if c.cohesion_score > 0.3 else "WEAK")
         print(f"  Cluster {c.cluster_id}: {c.name}")
@@ -414,7 +422,8 @@ def cmd_clusters(args) -> None:
         print(f"    Internal edges: {c.internal_edge_count} | External edges: {c.external_edge_count}")
         for pk in c.pages:
             marker = " [HUB]" if pk == c.hub_page else ""
-            print(f"      * {pk}{marker}")
+            ts_pr = c.topical_pagerank.get(pk, 0.0)
+            print(f"      * {pk:<42} (Topical PR: {ts_pr:.3f}){marker}")
         print()
 
 
@@ -444,6 +453,7 @@ def cmd_anchors(args) -> None:
             "exact_match_ratio": p.exact_match_ratio,
             "is_over_optimized": p.is_over_optimized,
             "recommendation": p.recommendation,
+            "suggested_variations": p.suggested_variations,
         } for p in profiles], indent=2))
         return
 
@@ -456,6 +466,28 @@ def cmd_anchors(args) -> None:
         print(f"    Anchors: {p.anchors}")
         print(f"    -> {p.recommendation}")
         print()
+
+
+def cmd_verify(args) -> None:
+    """Run the 6-Specialist Automated Quality Gate on the generated Excel Master Workbook."""
+    if getattr(args, "workbook", None):
+        wb_path = Path(args.workbook)
+    else:
+        wb_path = _index_path(args.index) / "link_architecture_master.xlsx"
+
+    res = audit_workbook(wb_path)
+    if getattr(args, "json", False):
+        print(json.dumps(res, indent=2))
+    else:
+        print(f"\n--- 6-Specialist Deliverable Quality Gate ---")
+        print(f"  Workbook:    {res.get('workbook')}")
+        print(f"  Specialists: {res.get('specialists_active', 6)} Active")
+        print(f"  Defects:     {res.get('total_defects', 0)}")
+        print(f"  Status:      [{res.get('status')}]")
+        for d in res.get("critical_defects", []):
+            print(f"    [!] [{d.get('specialist')}] Row {d.get('row', '?')}: {d.get('issue')}")
+    if res.get("status") != "PASS":
+        sys.exit(1)
 
 
 def cmd_protocol(args) -> None:
@@ -482,7 +514,6 @@ def cmd_health(args) -> None:
     data = json.loads(sug_file.read_text(encoding="utf-8"))
     raw_opps = data.get("opportunities") or data.get("suggestions") or []
 
-    # Collect unique internal target paths
     internal_targets = set()
     for item in raw_opps:
         target = item.get("target", "")
@@ -492,7 +523,6 @@ def cmd_health(args) -> None:
     print(f"\n--- Link Health Check ---")
     print(f"  Internal targets to verify: {len(internal_targets)}")
 
-    # For local mode, verify files exist
     if idx.kind == "local":
         missing = []
         for target in internal_targets:
@@ -506,7 +536,6 @@ def cmd_health(args) -> None:
             for m in missing:
                 print(f"      {m}")
     else:
-        # For web mode, use HTTP verification
         from .browser import verify_link_health
         urls = [f"{idx.root.rstrip('/')}{t}" for t in internal_targets if not t.startswith("http")]
         results = verify_link_health(urls[:50])
@@ -538,6 +567,8 @@ def cmd_cannibalization(args) -> None:
         print(json.dumps([{
             "query": i.query,
             "severity": i.severity,
+            "primary_page": i.primary_page,
+            "wasted_impressions": i.wasted_impressions,
             "competing_pages": i.competing_pages,
             "recommendation": i.recommendation,
         } for i in issues], indent=2))
@@ -562,8 +593,8 @@ def cmd_cannibalization(args) -> None:
 
 
 def main(argv: list[str] | None = None) -> None:
-    ap = argparse.ArgumentParser(prog="linkbert", description="LinkGraph Pro — Full-Spectrum SEO Link Architecture & Optimization.")
-    ap.add_argument("--version", action="version", version=f"LinkGraph Pro {__version__}")
+    ap = argparse.ArgumentParser(prog="linkbert", description="LinkBERT Pro — Full-Spectrum SEO Link Architecture & Optimization.")
+    ap.add_argument("--version", action="version", version=f"LinkBERT Pro {__version__}")
     sub = ap.add_subparsers(dest="cmd", required=True)
 
     def common(p):
@@ -629,14 +660,14 @@ def main(argv: list[str] | None = None) -> None:
     p.set_defaults(func=cmd_commit)
 
     # graph
-    p = sub.add_parser("graph", help="Display PageRank rankings and link equity flow")
+    p = sub.add_parser("graph", help="Display PageRank, Click Depth, and HITS rankings")
     p.add_argument("--json", action="store_true")
     p.add_argument("--index")
     p.set_defaults(func=cmd_graph)
 
     # clusters
-    p = sub.add_parser("clusters", help="Detect topic clusters (silos) and cohesion metrics")
-    p.add_argument("--method", choices=["url_hierarchy", "louvain", "label_propagation"], default="url_hierarchy")
+    p = sub.add_parser("clusters", help="Detect topic clusters (silos) and Topic-Sensitive PageRank")
+    p.add_argument("--method", choices=["url_hierarchy", "louvain", "label_propagation", "hybrid"], default="url_hierarchy")
     p.add_argument("--json", action="store_true")
     p.add_argument("--index")
     p.set_defaults(func=cmd_clusters)
@@ -665,6 +696,13 @@ def main(argv: list[str] | None = None) -> None:
     p = sub.add_parser("health", help="Verify HTTP health of all recommended link targets")
     p.add_argument("--index")
     p.set_defaults(func=cmd_health)
+
+    # verify / audit
+    p = sub.add_parser("verify", help="Run the 6-Specialist Automated Quality Gate on the Excel deliverable")
+    p.add_argument("--workbook", help="Explicit path to link_architecture_master.xlsx")
+    p.add_argument("--json", action="store_true")
+    p.add_argument("--index")
+    p.set_defaults(func=cmd_verify)
 
     # protocol
     p = sub.add_parser("protocol", help="Display or save the agent execution protocol")

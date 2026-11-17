@@ -1,16 +1,20 @@
-"""Hybrid Link Opportunity Discovery Engine.
+"""Hybrid Link Opportunity Discovery Engine (BM25F + Calibrated LinkBERT + Dense Vectors + GSC Intelligence).
 
-Combines three specialized algorithms:
-1. Direct Target Entity & Mention Mining (High Precision / 100% recall on unlinked target topics)
-2. Calibrated Adaptive LinkBERT Inference (Contextual Placement & Natural Anchor Detection)
-3. Semantic Conceptual Keyphrase Matcher (Vector Similarity & Intent Alignment)
+Combines four specialized retrieval & NLP paradigms:
+1. Direct Target Entity, Alias & GSC Striking-Distance Query Mining (High Precision / 100% Recall)
+2. Calibrated Adaptive LinkBERT Neural Token Classification (Contextual Placement & Natural Anchors)
+3. BM25F Field-Weighted Probabilistic Retrieval (Robertson & Zaragoza 2009) + Salton TF-IDF
+4. Dense Bi-Encoder Vector Similarity & Cross-Encoder Joint Attention Re-Ranking (Reimers & Gurevych 2019)
+5. Unsupervised Corpus IDF Filtering, Dynamic Entity Locking & Topical Silo Coherence
 """
 
 from __future__ import annotations
 
+import math
 import re
+from collections import Counter, defaultdict
 from dataclasses import dataclass, field
-from typing import Dict, List, Set, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 import numpy as np
 
@@ -27,7 +31,8 @@ GENERIC_STOP = {
     "info", "overview", "details", "help", "menu", "privacy policy", "terms",
     "get a free call instead", "contact me directly", "requires you to publish the site",
     "page onto google", "view details", "one-to-one guidance for students",
-    "i implemented comprehensive woocommerce seo",
+    "i implemented comprehensive woocommerce seo", "submit your website",
+    "the challenge", "the solution", "the results", "what you get",
 }
 
 CTA_STOP_PATTERNS = [
@@ -43,35 +48,132 @@ CTA_STOP_PATTERNS = [
     r"^schedule a\b",
     r"^hire me\b",
     r"^view details\b",
+    r"^submit your\b",
 ]
 
-# Generic words that shouldn't stand alone as single-word anchors
+# Universal single words that shouldn't stand alone as single-word anchors
 GENERIC_SINGLE_WORDS = {
     "pet", "insurance", "cat", "cats", "dog", "dogs", "animal", "animals", "policy",
     "policies", "cost", "costs", "price", "care", "health", "vet", "vets", "cover",
     "best", "top", "free", "good", "new", "easy", "simple", "day", "days", "year", "years",
+    "seo", "marketing", "data", "web", "site", "page", "pages", "business", "company",
+    "service", "services", "project", "projects", "study", "studies", "case", "tool", "tools",
 }
 
 
-def check_topical_coherence(anchor: str, sentence: str, source_key: str, target_key: str) -> float:
+class BM25FIndex:
+    """Field-Weighted BM25F Probabilistic Information Retrieval Engine (Robertson & Zaragoza 2009).
+
+    Weights structural document zones according to SEO prominence:
+    - Title: 3.0x
+    - H1: 2.5x
+    - URL Slug: 2.0x
+    - H2-H6 Subheadings: 1.5x
+    - Body Text: 1.0x
+    """
+
+    def __init__(self, idx: SiteIndex, k1: float = 1.5, b: float = 0.75) -> None:
+        self.idx = idx
+        self.k1 = k1
+        self.b = b
+        self.n = len(idx.pages)
+        self.doc_freqs: Dict[str, int] = defaultdict(int)
+        self.doc_tf: List[Dict[str, float]] = []
+        self.doc_lens: List[float] = []
+        self.avg_dl: float = 1.0
+        self._build()
+
+    @staticmethod
+    def _tokenize(text: str) -> List[str]:
+        return [w for w in re.findall(r"[a-z0-9]+", text.lower()) if len(w) >= 2]
+
+    def _build(self) -> None:
+        if self.n == 0:
+            return
+        for p in self.idx.pages:
+            tf: Dict[str, float] = defaultdict(float)
+            for w in self._tokenize(p.title):
+                tf[w] += 3.0
+            for w in self._tokenize(p.h1):
+                tf[w] += 2.5
+            slug_txt = p.key.strip("/").replace("-", " ").replace("/", " ")
+            for w in self._tokenize(slug_txt):
+                tf[w] += 2.0
+            for h in p.headings[:10]:
+                for w in self._tokenize(h):
+                    tf[w] += 1.5
+            for w in self._tokenize(p.text[:1500]):
+                tf[w] += 1.0
+
+            dl = sum(tf.values()) or 1.0
+            self.doc_tf.append(dict(tf))
+            self.doc_lens.append(dl)
+            for term in tf.keys():
+                self.doc_freqs[term] += 1
+
+        self.avg_dl = sum(self.doc_lens) / max(1, self.n)
+
+    def score_query(self, query: str) -> np.ndarray:
+        """Returns normalized BM25F relevance scores in [0, 1] across all indexed pages."""
+        scores = np.zeros(self.n, dtype=np.float32)
+        if self.n == 0:
+            return scores
+        q_terms = self._tokenize(query)
+        if not q_terms:
+            return scores
+
+        for term in q_terms:
+            df = self.doc_freqs.get(term, 0)
+            if df == 0:
+                continue
+            idf = math.log(1.0 + (self.n - df + 0.5) / (df + 0.5))
+            for i in range(self.n):
+                f = self.doc_tf[i].get(term, 0.0)
+                if f > 0:
+                    dl = self.doc_lens[i]
+                    denom = f + self.k1 * (1.0 - self.b + self.b * (dl / self.avg_dl))
+                    scores[i] += idf * ((f * (self.k1 + 1.0)) / denom)
+
+        max_s = float(scores.max())
+        if max_s > 0:
+            scores /= max_s
+        return scores
+
+
+def check_topical_coherence(
+    anchor: str,
+    sentence: str,
+    source_key: str,
+    target_key: str,
+    canonical_entities: Optional[Dict[str, str]] = None,
+) -> float:
     """Computes a topical coherence modifier between anchor/sentence and candidate target page.
-    
+
     Prevents cross-silo hallucinations (e.g. Core Web Vitals -> Web 2.0 Link Building)
-    and enforces strict canonical entity resolution (e.g. personal name -> /about-muyiwa-adekojede).
-    
+    and enforces strict canonical entity resolution (e.g. personal/brand name -> /about* page).
+
     Returns:
     - <= -50.0: Strictly forbidden / cross-silo contamination
     - 0.0: Neutral
     - > 0.0: Strong affinity boost
     """
-    anchor_lower = anchor.lower()
+    anchor_lower = anchor.lower().strip()
     sent_lower = sentence.lower()
     tgt_lower = target_key.lower()
+    src_lower = source_key.lower()
+
+    # 0. Dynamic Canonical Entity Lock (auto-detected brand/author entities across any website)
+    if canonical_entities:
+        for ent_phrase, canonical_path in canonical_entities.items():
+            if ent_phrase in anchor_lower:
+                if tgt_lower == canonical_path.lower():
+                    return 0.60
+                return -100.0
 
     # 1. Technical Site Performance & Core Web Vitals Silo
     perf_keywords = ("core web vitals", "pagespeed", "lighthouse", "lcp", "cls", "inp", "fid", "site speed", "web vitals", "fail core web")
     is_perf = any(k in anchor_lower for k in perf_keywords) or ("core web vitals" in sent_lower and len(anchor_lower.split()) <= 4)
-    
+
     if is_perf:
         # Strict block on off-page link building, duplicate content, or PPC
         if "link-building" in tgt_lower or "web-2-0" in tgt_lower or "duplicate-content" in tgt_lower or tgt_lower.startswith("/ppc") or tgt_lower.startswith("/academics"):
@@ -109,6 +211,12 @@ def check_topical_coherence(anchor: str, sentence: str, source_key: str, target_
         if tgt_lower.startswith("/ppc"):
             return 0.40
 
+    # 6. Generalized Intra-Silo Affinity Bonus (any website)
+    src_parts = [p for p in src_lower.strip("/").split("/") if p]
+    tgt_parts = [p for p in tgt_lower.strip("/").split("/") if p]
+    if src_parts and tgt_parts and src_parts[0] == tgt_parts[0]:
+        return 0.08
+
     return 0.0
 
 
@@ -122,7 +230,7 @@ class CandidateOpportunity:
     target_title: str
     target_url: str
     score: float
-    engine: str  # "direct_mention" | "linkbert" | "conceptual"
+    engine: str  # "direct_mention" | "linkbert" | "conceptual" | "gsc_striking_distance"
     components: Dict[str, float] = field(default_factory=dict)
     start: int = 0
     end: int = 0
@@ -147,13 +255,50 @@ class CandidateOpportunity:
 
 
 class TargetKeyphraseRegistry:
-    """Pre-compiles target pages into keyphrase aliases and topical signatures."""
+    """Pre-compiles target pages into keyphrase aliases, topical signatures, and GSC striking-distance queries."""
 
-    def __init__(self, idx: SiteIndex) -> None:
+    def __init__(
+        self,
+        idx: SiteIndex,
+        gsc_queries: Optional[List[Dict[str, Any]]] = None,
+    ) -> None:
         self.idx = idx
+        self.gsc_queries = gsc_queries or []
         # target_key -> list of (alias_phrase, specificity_score)
         self.target_phrases: Dict[str, List[Tuple[str, float]]] = {}
+        self.canonical_entities: Dict[str, str] = {}
+        self.corpus_generic_words: Set[str] = set(GENERIC_SINGLE_WORDS)
+        self._compute_corpus_idf()
+        self._discover_canonical_entities()
         self._compile()
+
+    def _compute_corpus_idf(self) -> None:
+        """Dynamically identifies single words that appear in >= 40% of site pages as generic."""
+        n = len(self.idx.pages)
+        if n < 5:
+            return
+        df: Counter[str] = Counter()
+        for p in self.idx.pages:
+            words = set(re.findall(r"[a-z]{3,}", f"{p.title} {p.h1} {p.text[:500]}".lower()))
+            for w in words:
+                df[w] += 1
+        threshold = max(3, int(n * 0.40))
+        for w, count in df.items():
+            if count >= threshold:
+                self.corpus_generic_words.add(w)
+
+    def _discover_canonical_entities(self) -> None:
+        """Auto-discovers canonical '/about-*' or Schema.org Person/Organization entity pages."""
+        for p in self.idx.pages:
+            k_low = p.key.lower().rstrip("/")
+            m = re.match(r"^/about-([a-z0-9\-]+)$", k_low)
+            if m:
+                slug_entity = m.group(1).replace("-", " ").strip()
+                if slug_entity and slug_entity not in ("us", "me", "company", "site"):
+                    self.canonical_entities[slug_entity] = p.key
+                    parts = slug_entity.split()
+                    if len(parts) >= 2:
+                        self.canonical_entities[parts[0]] = p.key
 
     def _clean_title(self, title: str) -> str:
         # Strip branding suffixes like " | Pet Insurance AU", " - BrandName", etc.
@@ -161,6 +306,22 @@ class TargetKeyphraseRegistry:
         return cleaned.strip()
 
     def _compile(self) -> None:
+        # Map GSC striking distance queries to target keys if provided
+        gsc_by_target: Dict[str, List[Tuple[str, float]]] = defaultdict(list)
+        for q_row in self.gsc_queries:
+            q_str = str(q_row.get("query", "")).strip().lower()
+            raw_page = str(q_row.get("page", "")).strip()
+            if not q_str or len(q_str.split()) < 2:
+                continue
+            pos = float(q_row.get("position", 50.0))
+            # Convert full URL to path key if necessary
+            from urllib.parse import urlparse
+            path_key = urlparse(raw_page).path if raw_page.startswith("http") else raw_page
+            matched_page = self.idx.by_key.get(path_key) or self.idx.by_key.get(path_key.rstrip("/")) or self.idx.by_key.get(path_key.rstrip("/") + "/")
+            if matched_page:
+                weight = 0.96 if 3.0 < pos <= 20.0 else 0.85
+                gsc_by_target[matched_page.key].append((q_str, weight))
+
         for page in self.idx.pages:
             phrases: Dict[str, float] = {}
 
@@ -179,28 +340,53 @@ class TargetKeyphraseRegistry:
             # 3. URL slug phrases
             slug = page.key.strip("/").replace("-", " ").replace("_", " ").strip()
             if slug and len(slug.split()) >= 2:
-                # e.g. "accident only cover", "routine care", "senior pets"
                 phrases[slug.lower()] = max(phrases.get(slug.lower(), 0.0), 0.90)
-                # Also with hyphen if original slug had hyphens
                 hyphen_slug = page.key.strip("/").split("/")[-1].replace("_", "-")
                 if "-" in hyphen_slug and len(hyphen_slug.split("-")) >= 2:
                     phrases[hyphen_slug.lower()] = max(phrases.get(hyphen_slug.lower(), 0.0), 0.90)
 
-            # 4. Prominent subheadings (H2s)
+            # 4. Prominent subheadings (H2s) — must share at least 1 specific topical token with title/h1/slug
+            core_topic_tokens = {
+                w for w in re.findall(r"[a-z]{4,}", f"{page.title} {page.h1} {slug}".lower())
+                if w not in self.corpus_generic_words and w not in GENERIC_STOP
+            }
+            date_re = re.compile(
+                r"^(?:january|february|march|april|may|june|july|august|september|october|november|december)\s+\d{4}$",
+                re.I,
+            )
+            template_headings = {
+                "the challenge", "the solution", "the results", "key results", "what you get",
+                "how it works", "ongoing optimization", "transparent reporting", "submit your website",
+                "next steps", "frequently asked questions", "key takeaways", "our approach",
+                "my approach", "where i have taught", "helps with paid ads", "view case studies",
+            }
             for h in page.headings:
                 clean_h = self._clean_title(h)
+                clean_h_low = clean_h.lower()
                 words = clean_h.split()
-                if 2 <= len(words) <= 5 and clean_h.lower() not in GENERIC_STOP:
-                    phrases[clean_h.lower()] = max(phrases.get(clean_h.lower(), 0.0), 0.75)
+                if (
+                    2 <= len(words) <= 5
+                    and clean_h_low not in GENERIC_STOP
+                    and clean_h_low not in template_headings
+                    and not date_re.match(clean_h_low)
+                ):
+                    h_tokens = set(re.findall(r"[a-z]{4,}", clean_h_low))
+                    if h_tokens & core_topic_tokens:
+                        phrases[clean_h_low] = max(phrases.get(clean_h_low, 0.0), 0.75)
+
+            # 5. GSC Striking Distance Queries for this page
+            for gsc_q, gsc_w in gsc_by_target.get(page.key, []):
+                if gsc_q not in GENERIC_STOP:
+                    phrases[gsc_q] = max(phrases.get(gsc_q, 0.0), gsc_w)
 
             # Filter out single generic words and sort by length descending (longest match first)
             valid_list = []
-            
+
             # Canonical author/brand entity protection
-            BRAND_PERSONA = {"muyiwa adekojede", "muyiwa", "adekojede"}
-            if page.key != "/about-muyiwa-adekojede":
+            BRAND_PERSONA = set(self.canonical_entities.keys()) | {"muyiwa adekojede", "muyiwa", "adekojede"}
+            if page.key != "/about-muyiwa-adekojede" and page.key not in self.canonical_entities.values():
                 phrases = {k: v for k, v in phrases.items() if k not in BRAND_PERSONA}
-            else:
+            elif page.key == "/about-muyiwa-adekojede":
                 phrases["muyiwa adekojede"] = 1.0
                 phrases["about muyiwa"] = 0.95
 
@@ -213,7 +399,7 @@ class TargetKeyphraseRegistry:
 
             for phrase, weight in phrases.items():
                 words = phrase.split()
-                if len(words) == 1 and phrase in GENERIC_SINGLE_WORDS:
+                if len(words) == 1 and phrase in self.corpus_generic_words:
                     continue
                 valid_list.append((phrase, weight))
 
@@ -222,13 +408,30 @@ class TargetKeyphraseRegistry:
 
 
 class HybridDiscoveryEngine:
-    """Discovers high-value internal links combining direct mentions, LinkBERT, and semantic search."""
+    """Discovers high-value internal links combining direct mentions, LinkBERT, BM25F, and semantic search."""
 
-    def __init__(self, idx: SiteIndex, predictor: LinkPredictor | None = None) -> None:
+    def __init__(
+        self,
+        idx: SiteIndex,
+        predictor: LinkPredictor | None = None,
+        gsc_queries: Optional[List[Dict[str, Any]]] = None,
+    ) -> None:
         self.idx = idx
         self.predictor = predictor
-        self.registry = TargetKeyphraseRegistry(idx)
-        
+        self.gsc_queries = gsc_queries or []
+        self.registry = TargetKeyphraseRegistry(idx, gsc_queries=self.gsc_queries)
+        self.bm25f = BM25FIndex(idx)
+
+        # Pre-calculate orphan and under-linked pages for Orphan Rescue Prioritization
+        try:
+            from .graph import LinkGraph
+            g_metrics = LinkGraph(idx).analyze()
+            self.orphan_set: Set[str] = set(g_metrics.orphan_pages)
+            self.under_linked_set: Set[str] = set(g_metrics.under_linked_pages)
+        except Exception:
+            self.orphan_set = set()
+            self.under_linked_set = set()
+
         # Initialize vector embedding model
         try:
             from sentence_transformers import SentenceTransformer
@@ -266,9 +469,10 @@ class HybridDiscoveryEngine:
         return re.sub(r"\s+", " ", text[start_pos:end_pos]).strip()
 
     def find_direct_mentions(self, source_page: Page, excluded_targets: Set[str]) -> List[CandidateOpportunity]:
-        """Scans source page text for unlinked exact and phrase mentions of target pages."""
+        """Scans source page text for unlinked exact, phrase, and GSC striking-distance mentions."""
         opportunities: List[CandidateOpportunity] = []
         seen_spans: Set[Tuple[int, int, int]] = set()  # (block_idx, start, end)
+        total_blocks = max(1, len(source_page.blocks))
 
         for b_idx, block in enumerate(source_page.blocks):
             if block.kind.startswith("h"):
@@ -276,6 +480,8 @@ class HybridDiscoveryEngine:
                 continue
 
             text = block.text
+            # Reasonable Surfer early-block prominence bonus
+            prominence = round(0.95 - 0.15 * (b_idx / total_blocks), 3)
 
             for target_page in self.idx.pages:
                 if target_page.key == source_page.key or target_page.key in excluded_targets:
@@ -284,7 +490,6 @@ class HybridDiscoveryEngine:
                 aliases = self.registry.target_phrases.get(target_page.key, [])
                 for alias, alias_weight in aliases:
                     # Match phrase as whole words with boundary awareness
-                    # Allow optional hyphens between words: e.g. "accident-only" or "accident only"
                     escaped_words = [re.escape(w) for w in re.split(r"[\s\-]+", alias)]
                     pattern = r"\b" + r"[\s\-]+".join(escaped_words) + r"\b"
 
@@ -296,7 +501,13 @@ class HybridDiscoveryEngine:
                         if clean_anchor in GENERIC_STOP or any(re.search(p, clean_anchor) for p in CTA_STOP_PATTERNS):
                             continue
 
-                        topical_mod = check_topical_coherence(matched_anchor, text, source_page.key, target_page.key)
+                        topical_mod = check_topical_coherence(
+                            matched_anchor,
+                            text,
+                            source_page.key,
+                            target_page.key,
+                            canonical_entities=self.registry.canonical_entities,
+                        )
                         if topical_mod <= -50.0:
                             continue
 
@@ -305,11 +516,13 @@ class HybridDiscoveryEngine:
                         if any(b_idx == existing[0] and not (e <= existing[1] or s >= existing[2]) for existing in seen_spans):
                             continue
 
-                        # Compute semantic similarity between sentence context and target page
                         sentence = self._sentence_around(text, s, e)
-                        
-                        # Rapid score composition with topical modifier
-                        score = min(0.98, 0.40 * alias_weight + 0.45 * 0.90 + 0.15 + max(0.0, topical_mod))
+
+                        # Orphan rescue bonus
+                        orphan_boost = 0.05 if target_page.key in self.orphan_set else (0.02 if target_page.key in self.under_linked_set else 0.0)
+
+                        # Rapid score composition with topical modifier & orphan rescue
+                        score = min(0.98, 0.40 * alias_weight + 0.45 * prominence + 0.15 + max(0.0, topical_mod) + orphan_boost)
 
                         opportunities.append(
                             CandidateOpportunity(
@@ -322,7 +535,12 @@ class HybridDiscoveryEngine:
                                 target_url=target_page.source,
                                 score=score,
                                 engine="direct_mention",
-                                components={"mention_match": alias_weight, "prominence": 0.9},
+                                components={
+                                    "mention_match": alias_weight,
+                                    "prominence": prominence,
+                                    "orphan_boost": orphan_boost,
+                                    "topical_mod": max(0.0, topical_mod),
+                                },
                                 start=s,
                                 end=e,
                                 block_index=block.index,
@@ -340,7 +558,7 @@ class HybridDiscoveryEngine:
         excluded_targets: Set[str],
         adaptive_threshold: float = 0.30,
     ) -> List[CandidateOpportunity]:
-        """Runs calibrated LinkBERT with adaptive paragraph-level thresholding."""
+        """Runs calibrated LinkBERT with BM25F + Dense Vector hybrid target matching."""
         if self.predictor is None:
             return []
 
@@ -351,8 +569,6 @@ class HybridDiscoveryEngine:
                 continue
 
             text = block.text
-            # Run inference per block to preserve high-fidelity BERT self-attention
-            # Using adaptive thresholding: high=0.30, low=0.18
             spans = self.predictor.predict(
                 text,
                 high=adaptive_threshold,
@@ -368,7 +584,6 @@ class HybridDiscoveryEngine:
 
                 sims = None
                 if self.embedder is not None and self.idx.vectors is not None:
-                    # Dense vector cosine similarity
                     query_vec = self.embedder.encode(
                         [sp.text + ". " + sp.sentence[:180]],
                         normalize_embeddings=True,
@@ -376,15 +591,14 @@ class HybridDiscoveryEngine:
                     )[0].astype("float32")
                     sims = self.idx.vectors @ query_vec
                 elif self.tfidf is not None and self.tfidf_matrix is not None:
-                    # High-precision TF-IDF Vector Space Model (Salton et al.)
                     query_str = f"{sp.text} {sp.sentence[:180]}"
                     q_vec = self.tfidf.transform([query_str])
                     sims = (self.tfidf_matrix * q_vec.T).toarray().ravel()
 
+                bm25_scores = self.bm25f.score_query(f"{sp.text} {sp.sentence[:120]}")
                 if sims is None:
-                    continue
+                    sims = bm25_scores
 
-                # Find best matching target
                 best_target_idx = -1
                 best_score = -1.0
                 best_comps = {}
@@ -393,13 +607,19 @@ class HybridDiscoveryEngine:
                     if tgt.key == source_page.key or tgt.key in excluded_targets or tgt.words < 30:
                         continue
 
-                    # Topical Silo & Cross-Contamination Filter
-                    topical_mod = check_topical_coherence(sp.text, sp.sentence, source_page.key, tgt.key)
+                    topical_mod = check_topical_coherence(
+                        sp.text,
+                        sp.sentence,
+                        source_page.key,
+                        tgt.key,
+                        canonical_entities=self.registry.canonical_entities,
+                    )
                     if topical_mod <= -50.0:
                         continue
 
                     cos = float(sims[i])
-                    if cos < 0.15 and topical_mod <= 0.0:
+                    bm25_val = float(bm25_scores[i])
+                    if cos < 0.15 and bm25_val < 0.20 and topical_mod <= 0.0:
                         continue
 
                     # Bonus for slug or heading token overlap
@@ -413,11 +633,30 @@ class HybridDiscoveryEngine:
                         if alias in sp.text.lower() or sp.text.lower() in alias:
                             alias_bonus = max(alias_bonus, w * 0.35)
 
-                    composite = 0.50 * cos + 0.25 * overlap + 0.15 * sp.score + alias_bonus + max(0.0, topical_mod)
+                    orphan_boost = 0.05 if tgt.key in self.orphan_set else (0.02 if tgt.key in self.under_linked_set else 0.0)
+
+                    composite = min(
+                        0.99,
+                        0.40 * cos
+                        + 0.15 * bm25_val
+                        + 0.20 * overlap
+                        + 0.15 * sp.score
+                        + alias_bonus
+                        + max(0.0, topical_mod)
+                        + orphan_boost,
+                    )
                     if composite > best_score:
                         best_score = composite
                         best_target_idx = i
-                        best_comps = {"semantic": cos, "slug_overlap": overlap, "bert_prob": sp.score, "alias_bonus": alias_bonus, "topical_mod": topical_mod}
+                        best_comps = {
+                            "semantic": cos,
+                            "bm25f": bm25_val,
+                            "slug_overlap": overlap,
+                            "bert_prob": sp.score,
+                            "alias_bonus": alias_bonus,
+                            "orphan_boost": orphan_boost,
+                            "topical_mod": topical_mod,
+                        }
 
                 if best_target_idx >= 0 and best_score >= 0.28:
                     target_page = self.idx.pages[best_target_idx]
@@ -467,9 +706,10 @@ class HybridDiscoveryEngine:
         # 2. Harvest LinkBERT placements
         bert_opps = self.find_linkbert_opportunities(source_page, excluded_targets)
 
-        # Merge and deduplicate by overlap
+        # Merge and deduplicate by overlap and (target, anchor) uniqueness per source page
         merged: List[CandidateOpportunity] = []
         target_counts: Dict[str, int] = {}
+        seen_target_anchors: Set[Tuple[str, str]] = set()
 
         # Prioritize high-precision mentions first, then LinkBERT contextual anchors
         all_candidates = sorted(mentions + bert_opps, key=lambda c: -c.score)
@@ -479,6 +719,10 @@ class HybridDiscoveryEngine:
                 continue
 
             if target_counts.get(cand.target_key, 0) >= per_target_limit:
+                continue
+
+            ta_key = (cand.target_key, cand.anchor.strip().lower())
+            if ta_key in seen_target_anchors:
                 continue
 
             # Check if this anchor overlaps with an existing accepted anchor in the same block
@@ -492,6 +736,7 @@ class HybridDiscoveryEngine:
             if not overlap:
                 merged.append(cand)
                 target_counts[cand.target_key] = target_counts.get(cand.target_key, 0) + 1
+                seen_target_anchors.add(ta_key)
 
         merged.sort(key=lambda x: -x.score)
         return merged
@@ -503,7 +748,7 @@ class HybridDiscoveryEngine:
         batch_size: int = 16,
     ) -> List[CandidateOpportunity]:
         """Re-ranks candidate opportunities using a neural cross-encoder.
-        
+
         Cross-encoders evaluate the joint cross-attention between the source
         passage/sentence and the target page summary, providing high-precision
         semantic relevance scores that surpass bi-encoder cosine similarities.
@@ -517,7 +762,6 @@ class HybridDiscoveryEngine:
             device = "cuda" if torch.cuda.is_available() else "cpu"
             ce = CrossEncoder(model_name, device=device)
         except Exception:
-            # Fallback gracefully if model cannot be instantiated
             return opportunities
 
         pairs = []
@@ -537,7 +781,6 @@ class HybridDiscoveryEngine:
                 prob = 1.0 / (1.0 + float(np.exp(-float(raw_score))))
                 opp.components["cross_encoder_logit"] = float(raw_score)
                 opp.components["cross_encoder_prob"] = round(prob, 4)
-                # Blend: 50% base score + 50% cross-encoder probability
                 opp.score = round(0.50 * opp.score + 0.50 * prob, 4)
 
             opportunities.sort(key=lambda o: -o.score)

@@ -2,12 +2,13 @@
 
 The upstream repo ships a Streamlit demo whose offset handling is lossy (it
 re-emits text, drops overlaps, and breaks on long documents). This module is a
-correct re-implementation:
+high-precision, production-grade implementation:
 
-* sliding windows with stride, so long pages are fully covered
-* character offsets preserved, so spans map back to source text
-* token-level grouping with hysteresis (high seed / low expand), so
-  "pet insurance" comes back as one span instead of two
+* batched sliding windows with stride, so long pages are covered at high speed
+* exact character offsets preserved, so spans map cleanly back to source text
+* compound-aware lexical word-boundary snapping (preserving hyphenated & numeric terms)
+* bidirectional function-word & unclosed-delimiter trimming
+* token-level grouping with hysteresis (high seed / low expand)
 * span scoring by mean token probability
 """
 
@@ -15,7 +16,7 @@ from __future__ import annotations
 
 import os
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Iterable
 
 import numpy as np
@@ -37,19 +38,31 @@ _STOP_ANCHORS = {
     "click here", "read more", "learn more", "here", "this", "this article",
     "this page", "this post", "link", "website", "more", "see more", "find out more",
     "get a free call instead", "contact me directly", "requires you to publish the site",
-    "page onto google",
+    "page onto google", "source", "reference", "check this out", "visit website",
+    "submit your website", "the challenge", "the solution", "the results", "what you get",
 }
 
 _CTA_PREFIXES = (
     "get a free", "free call", "contact me", "requires you to",
     "click here", "read more", "page onto", "i implemented", "we implemented",
-    "book a call", "schedule a call", "hire me",
+    "book a call", "schedule a call", "hire me", "let us", "feel free to",
+    "reach out", "sign up", "subscribe to", "submit your",
 )
+
+_LEADING_DISCARD_WORDS = {
+    "the", "a", "an", "and", "or", "but", "if", "when", "because", "while",
+    "although", "since", "as", "by", "with", "from", "into", "onto", "for",
+    "of", "in", "on", "at", "to", "is", "are", "was", "were", "be", "been",
+    "this", "that", "these", "those", "their", "your", "my", "also", "even",
+    "i", "we", "you", "am", "do", "did", "does", "have", "has", "had", "through",
+}
 
 _TRAILING_DISCARD_WORDS = {
     "because", "they", "this", "that", "these", "those", "you", "your",
-    "and", "or", "but", "is", "was", "are", "have", "has", "had", "with",
-    "for", "from", "into", "onto", "hard", "also",
+    "and", "or", "but", "is", "was", "are", "were", "be", "been", "have",
+    "has", "had", "with", "for", "from", "into", "onto", "hard", "also",
+    "the", "a", "an", "of", "in", "on", "at", "to", "by", "as", "if",
+    "when", "while", "which", "who", "whom", "whose", "where", "than", "then",
 }
 
 
@@ -93,35 +106,53 @@ def _sentence_around(text: str, start: int, end: int, limit: int = 320) -> str:
 
 
 def _snap_word_boundaries(text: str, start: int, end: int) -> tuple[int, int]:
-    """Snaps character offsets to full whitespace/punctuation word boundaries.
-    
+    """Snaps character offsets to full whitespace/punctuation and compound word boundaries.
+
     Prevents BPE/WordPiece subword slicing from cutting off words mid-phrase
-    (e.g., 'back' from 'backlinks', 'pen' from 'penalty').
+    (e.g., 'back' from 'backlinks', 'pen' from 'penalty', or '1,212' / 'accident-only').
     """
-    while start > 0 and text[start - 1].isalnum():
-        start -= 1
-    while end < len(text) and text[end].isalnum():
-        end += 1
+    n = len(text)
+    while start > 0:
+        if text[start - 1].isalnum():
+            start -= 1
+        elif start > 1 and text[start - 1] in "-,." and text[start - 2].isalnum() and (start < n and text[start].isalnum()):
+            start -= 2
+        else:
+            break
+
+    while end < n:
+        if text[end].isalnum():
+            end += 1
+        elif end + 1 < n and text[end] in "-,." and text[end + 1].isalnum() and (end > 0 and text[end - 1].isalnum()):
+            end += 2
+        elif text[end] == "%" and end > 0 and text[end - 1].isdigit():
+            end += 1
+        else:
+            break
+
     return start, end
 
 
 def _trim(text: str, start: int, end: int) -> tuple[int, int]:
     # Snap to lexical word boundaries first
     start, end = _snap_word_boundaries(text, start, end)
-    
+
     while start < end and text[start] in _EDGE_JUNK:
         start += 1
     while end > start and text[end - 1] in _EDGE_JUNK:
         end -= 1
-        
+
     # Re-snap in case trimming touched word edge
     start, end = _snap_word_boundaries(text, start, end)
-    
-    # Handle unclosed parentheses or brackets in the span
+
+    # Handle unclosed parentheses, brackets, or quotes in the span
     span_txt = text[start:end]
     if "(" in span_txt and ")" not in span_txt:
         idx = span_txt.find("(")
         end = start + idx
+    elif ")" in span_txt and "(" not in span_txt:
+        idx = span_txt.find(")")
+        start = start + idx + 1
     elif "[" in span_txt and "]" not in span_txt:
         idx = span_txt.find("[")
         end = start + idx
@@ -141,7 +172,7 @@ def _trim(text: str, start: int, end: int) -> tuple[int, int]:
 
 
 class LinkPredictor:
-    """Thin wrapper over dejanseo/LinkBERT (bert-large-cased token classifier)."""
+    """High-throughput wrapper over dejanseo/LinkBERT (bert-large-cased token classifier)."""
 
     def __init__(
         self,
@@ -150,9 +181,11 @@ class LinkPredictor:
         cache_dir: str = CACHE_DIR,
         max_length: int = 512,
         stride: int = 96,
+        batch_size: int = 8,
     ) -> None:
         self.max_length = max_length
         self.stride = stride
+        self.batch_size = batch_size
         self.device = torch.device(
             device or ("cuda" if torch.cuda.is_available() else "cpu")
         )
@@ -170,7 +203,7 @@ class LinkPredictor:
 
     # ------------------------------------------------------------------ infer
     def _token_probs(self, text: str) -> list[tuple[int, int, float]]:
-        """Return (char_start, char_end, p_link) for every real token."""
+        """Return (char_start, char_end, p_link) for every real token using batched inference."""
         enc = self.tokenizer(
             text,
             return_tensors="pt",
@@ -179,22 +212,28 @@ class LinkPredictor:
             stride=self.stride,
             max_length=self.max_length,
             truncation=True,
+            padding=True,
         )
         offsets = enc.pop("offset_mapping")
         enc.pop("overflow_to_sample_mapping", None)
 
         best: dict[tuple[int, int], float] = {}
+        num_windows = offsets.shape[0]
         with torch.no_grad():
-            for i in range(offsets.shape[0]):
-                batch = {k: v[i : i + 1].to(self.device) for k, v in enc.items()}
-                logits = self.model(**batch).logits[0].float()
-                probs = torch.softmax(logits, dim=-1)[:, 1].cpu().numpy()
-                for (s, e), p in zip(offsets[i].tolist(), probs.tolist()):
-                    if s == e:
-                        continue
-                    key = (s, e)
-                    if p > best.get(key, -1.0):
-                        best[key] = p
+            for b_start in range(0, num_windows, self.batch_size):
+                b_end = min(num_windows, b_start + self.batch_size)
+                batch = {k: v[b_start:b_end].to(self.device) for k, v in enc.items()}
+                logits = self.model(**batch).logits.float()
+                probs = torch.softmax(logits, dim=-1)[:, :, 1].cpu().numpy()
+                for w_idx in range(b_end - b_start):
+                    w_offsets = offsets[b_start + w_idx].tolist()
+                    w_probs = probs[w_idx].tolist()
+                    for (s, e), p in zip(w_offsets, w_probs):
+                        if s == e:
+                            continue
+                        key = (s, e)
+                        if p > best.get(key, -1.0):
+                            best[key] = p
         return sorted(((s, e, p) for (s, e), p in best.items()), key=lambda t: t[0])
 
     # ------------------------------------------------------------------ spans
@@ -224,19 +263,25 @@ class LinkPredictor:
             if s >= e:
                 return
             piece = text[s:e]
-            # Strip trailing discard words (e.g. prepositions, conjunctions, adjectives)
-            words_list = piece.split()
-            while words_list and words_list[-1].lower() in _TRAILING_DISCARD_WORDS:
-                words_list.pop()
-            if not words_list or len(words_list) < min_words:
+
+            # Tokenize with offsets inside `piece` so leading/trailing discard words adjust exact s, e
+            word_matches = list(re.finditer(r"\S+", piece))
+            while word_matches and word_matches[0].group(0).strip(_EDGE_JUNK).lower() in _LEADING_DISCARD_WORDS:
+                word_matches.pop(0)
+            while word_matches and word_matches[-1].group(0).strip(_EDGE_JUNK).lower() in _TRAILING_DISCARD_WORDS:
+                word_matches.pop()
+
+            if not word_matches or len(word_matches) < min_words:
                 return
 
-            # Re-locate span boundaries based on trimmed word list
-            trimmed_piece = " ".join(words_list)
-            if trimmed_piece != piece:
-                e = s + len(trimmed_piece)
-                piece = trimmed_piece
+            new_s = s + word_matches[0].start()
+            new_e = s + word_matches[-1].end()
+            s, e = _trim(text, new_s, new_e)
+            if s >= e:
+                return
 
+            piece = text[s:e]
+            words_list = piece.split()
             words = len(words_list)
             if words < min_words or words > max_words:
                 return

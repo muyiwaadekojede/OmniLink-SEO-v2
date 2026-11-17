@@ -8,20 +8,23 @@ import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
 from urllib.parse import urljoin, urlparse, urldefrag
 
 import requests
 
-from .extract import Block, Doc, parse_html, parse_file
+from .extract import Block, Doc, LinkDetail, parse_html, parse_file
 
-UA = "linkbert-seo/1.0 (+internal linking analysis)"
+UA = "linkbert-pro/2.0 (+internal & external link architecture engine)"
 HEADERS = {"User-Agent": UA, "Accept": "text/html,application/xhtml+xml"}
 
 LOCAL_HTML = {".html", ".htm"}
 LOCAL_MD = {".md", ".mdx", ".markdown"}
+LOCAL_JSX = {".tsx", ".jsx", ".astro"}
 SKIP_DIRS = {
     "node_modules", ".git", ".next", ".nuxt", ".cache", "vendor",
-    "assets", "images", "img", "fonts", "static", "media",
+    "assets", "images", "img", "fonts", "static", "media", "components",
+    "hooks", "utils", "lib", "styles", "__tests__", "tests",
 }
 BUILD_DIRS = ["dist", "out", "build", "_site", "public", ".output", "site"]
 
@@ -39,6 +42,8 @@ class Page:
     links: list[str] = field(default_factory=list)
     blocks: list[Block] = field(default_factory=list)
     is_draft: bool = False
+    link_details: list[LinkDetail] = field(default_factory=list)
+    schema_entities: list[dict[str, Any]] = field(default_factory=list)
 
     def embed_text(self) -> str:
         parts = [self.title, self.h1, " | ".join(self.headings[:12])]
@@ -48,25 +53,45 @@ class Page:
         return ". ".join(p for p in parts if p)
 
     def as_dict(self) -> dict:
-        return {
-            "key": self.key, "source": self.source, "title": self.title,
-            "description": self.description, "h1": self.h1,
-            "headings": self.headings, "text": self.text, "words": self.words,
+        d = {
+            "key": self.key,
+            "source": self.source,
+            "title": self.title,
+            "description": self.description,
+            "h1": self.h1,
+            "headings": self.headings,
+            "text": self.text,
+            "words": self.words,
             "links": self.links,
             "blocks": [b.as_dict() for b in self.blocks],
         }
+        if self.link_details:
+            d["link_details"] = [ld.as_dict() for ld in self.link_details]
+        if self.schema_entities:
+            d["schema_entities"] = self.schema_entities
+        return d
 
     @classmethod
     def from_dict(cls, d: dict) -> "Page":
-        blocks = [Block(**b) for b in d.pop("blocks", [])]
-        return cls(blocks=blocks, **d)
+        data = dict(d)
+        blocks = [Block(**b) for b in data.pop("blocks", [])]
+        raw_lds = data.pop("link_details", [])
+        link_details = [LinkDetail(**ld) for ld in raw_lds] if raw_lds else []
+        schema_entities = data.pop("schema_entities", [])
+        return cls(
+            blocks=blocks,
+            link_details=link_details,
+            schema_entities=schema_entities,
+            **data,
+        )
 
 
 # --------------------------------------------------------------------- local
 def _local_key(path: Path, root: Path) -> str:
     rel = path.relative_to(root).as_posix()
-    rel = re.sub(r"index\.(html?|mdx?|markdown)$", "", rel)
-    rel = re.sub(r"\.(html?|mdx?|markdown)$", "", rel)
+    rel = re.sub(r"^(?:src/)?(?:app|pages)/", "", rel)
+    rel = re.sub(r"(?:index|page)\.(html?|mdx?|markdown|tsx|jsx|astro)$", "", rel)
+    rel = re.sub(r"\.(html?|mdx?|markdown|tsx|jsx|astro)$", "", rel)
     if not rel.startswith("/"):
         rel = "/" + rel
     if not rel.endswith("/") and "." not in rel.rsplit("/", 1)[-1]:
@@ -87,13 +112,15 @@ def _pick_root(target: Path) -> Path:
 
 def load_local(target: Path, limit: int | None = None) -> list[Page]:
     root = _pick_root(target)
+    all_exts = LOCAL_HTML | LOCAL_MD | LOCAL_JSX
     files: list[Path] = []
     for p in sorted(root.rglob("*")):
-        if not p.is_file() or p.suffix.lower() not in LOCAL_HTML | LOCAL_MD:
+        if not p.is_file() or p.suffix.lower() not in all_exts:
             continue
-        if any(part.lower() in SKIP_DIRS for part in p.parts):
+        rel_parts = p.relative_to(root).parts[:-1]
+        if any(part.lower() in SKIP_DIRS for part in rel_parts):
             continue
-        if p.name.lower() in {"404.html", "500.html", "_app.html"}:
+        if p.name.lower() in {"404.html", "500.html", "_app.html", "layout.tsx", "layout.jsx", "error.tsx", "loading.tsx", "not-found.tsx", "_app.tsx", "_document.tsx"}:
             continue
         files.append(p)
     if limit:
@@ -119,6 +146,8 @@ def load_local(target: Path, limit: int | None = None) -> list[Page]:
                 words=doc.words,
                 links=doc.links,
                 blocks=doc.blocks,
+                link_details=doc.link_details,
+                schema_entities=doc.schema_entities,
             )
         )
     return pages
@@ -235,9 +264,18 @@ def load_web(base: str, max_pages: int = 200, max_depth: int = 3) -> list[Page]:
             return None
         path = urlparse(url).path or "/"
         return Page(
-            key=path, source=url, title=doc.title or doc.h1,
-            description=doc.description, h1=doc.h1, headings=doc.headings(),
-            text=doc.text, words=doc.words, links=doc.links, blocks=doc.blocks,
+            key=path,
+            source=url,
+            title=doc.title or doc.h1,
+            description=doc.description,
+            h1=doc.h1,
+            headings=doc.headings(),
+            text=doc.text,
+            words=doc.words,
+            links=doc.links,
+            blocks=doc.blocks,
+            link_details=doc.link_details,
+            schema_entities=doc.schema_entities,
         )
 
     with ThreadPoolExecutor(max_workers=6) as pool:
@@ -274,6 +312,7 @@ class SiteIndex:
         ).astype("float32")
 
     def save(self, out: Path) -> None:
+        out = Path(out)
         out.mkdir(parents=True, exist_ok=True)
         (out / "site.json").write_text(
             json.dumps(
@@ -292,7 +331,8 @@ class SiteIndex:
             np.save(out / "vectors.npy", self.vectors)
 
     @classmethod
-    def load(cls, out: Path) -> "SiteIndex":
+    def load(cls, out: Path | str) -> "SiteIndex":
+        out = Path(out)
         data = json.loads((out / "site.json").read_text(encoding="utf-8"))
         idx = cls([Page.from_dict(p) for p in data["pages"]], data.get("root", ""), data.get("kind", "local"))
         vec = out / "vectors.npy"
@@ -303,8 +343,9 @@ class SiteIndex:
         return idx
 
 
-def build(target: str, out: Path, max_pages: int = 200, max_depth: int = 3,
+def build(target: str, out: Path | str, max_pages: int = 200, max_depth: int = 3,
           embed: bool = True) -> SiteIndex:
+    out = Path(out)
     if target.startswith(("http://", "https://")):
         pages = load_web(target, max_pages=max_pages, max_depth=max_depth)
         idx = SiteIndex(pages, root=target, kind="web")
