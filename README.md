@@ -1,39 +1,41 @@
-# LinkBERT Pro
+# OmniLink SEO v2 (LinkBERT Pro Engine)
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
 [![Python: 3.10+](https://img.shields.io/badge/python-3.10%2B-blue)](https://www.python.org/)
-[![Version: 2.0.0](https://img.shields.io/badge/Version-2.0.0-brightgreen)](https://github.com/muyiwaadekojede/LinkBERT-Pro)
-[![Model: dejanseo/LinkBERT](https://img.shields.io/badge/HuggingFace-dejanseo%2FLinkBERT-yellow)](https://huggingface.co/dejanseo/LinkBERT)
-[![Architecture: Hybrid%20Graph%2BNLP%2BBM25F](https://img.shields.io/badge/Architecture-Hybrid%20Graph%20%2B%20NLP%20%2B%20BM25F-purple)](https://github.com/muyiwaadekojede/LinkBERT-Pro)
-[![Open Source: For the Community](https://img.shields.io/badge/Community-Open%20Source-orange)](https://github.com/muyiwaadekojede/LinkBERT-Pro)
+[![Version: 2.0.0](https://img.shields.io/badge/Version-v2.0.0-brightgreen)](https://github.com/muyiwaadekojede/OmniLink-SEO-v2)
+[![Neural Component: dejanseo/LinkBERT](https://img.shields.io/badge/HuggingFace-dejanseo%2FLinkBERT-yellow)](https://huggingface.co/dejanseo/LinkBERT)
+[![Architecture: Graph%20%2B%20BM25F%20%2B%20NLP%20%2B%20GSC](https://img.shields.io/badge/Architecture-Graph%20%2B%20BM25F%20%2B%20NLP%20%2B%20GSC-purple)](https://github.com/muyiwaadekojede/OmniLink-SEO-v2)
+[![Open Source: For the Community](https://img.shields.io/badge/Community-Open%20Source-orange)](https://github.com/muyiwaadekojede/OmniLink-SEO-v2)
 
-**LinkBERT Pro (v2.0)** is an open-source, enterprise-grade SEO internal and external link optimization engine, web graph simulator, and citation intelligence framework.
+**OmniLink SEO v2** is an open-source, all-in-one SEO **Internal & External Link Optimization Engine**, **Web Graph Simulator**, **Search Console Striking-Distance Optimizer**, and **E-E-A-T Citation Intelligence Framework**.
 
-It unites computational linguistics (batched neural token classification, BM25F field-weighted probabilistic retrieval, dense bi-encoder vector embeddings, cross-encoder joint-attention re-ranking) with rigorous network graph mathematics (Reasonable Surfer PageRank, Kleinberg HITS Hubs & Authorities, Haveliwala Topic-Sensitive PageRank, Brandes Betweenness Centrality, Louvain community modularity, Shannon entropy) and empirical search engine patent principles (TrustRank seed proximity, E-E-A-T primary source verification, and Google Search Console striking-distance intelligence).
+Rather than relying on a single algorithm, OmniLink SEO v2 combines **10+ peer-reviewed algorithms** across Graph Theory, Information Retrieval, Computational Linguistics, and Search Engine Patent Engineering:
+* **Graph Theory & Link Equity**: Reasonable Surfer PageRank (US Patent 7,716,225 B1), Kleinberg HITS (Hubs & Authorities), Haveliwala Topic-Sensitive PageRank, Brandes Shortest-Path Betweenness Centrality, Louvain Community Modularity, and BFS Click Depth.
+* **Information Retrieval & Neural NLP**: BM25F Field-Weighted Probabilistic Search, Dense Bi-Encoder Vector Similarity (`all-MiniLM-L6-v2`), Cross-Encoder Joint-Attention Re-Ranking (`ms-marco-MiniLM`), Calibrated `LinkBERT` Neural Token Classification, and Shannon Entropy Anchor Diversity Guards.
+* **External Linking & E-E-A-T Citations**: 10-Vertical TrustRank Seed Authority Ontology (60+ primary repositories including W3Techs, HTTP Archive, StatCounter, Statista, W3C, RFCs, OWASP, NIST, PubMed, AVMA, SEC, Baymard), Outbound Link Budgeting, and Existing Link Security/Protocol Auditing.
+* **Google Search Console (GSC) Full-Loop Integration**: Striking-Distance Query Injection (Positions 4–20) and Keyword Cannibalization Detection & Consolidation.
+* **AST-Safe Codebase Automation**: Atomic `.bak` backup & rollback link injection across HTML, Markdown, MDX, Next.js (`.tsx`/`.jsx`), and Astro (`.astro`).
 
 ---
 
 ## 1. Origins, Credit & Community Attribution
 
-### The Original Foundation: Dan Petrovic & DEJAN Marketing
-This project builds directly upon the pioneering conceptual and machine learning foundations laid by Australian SEO researcher and innovator **Dan Petrovic** ([DEJAN Marketing](https://dejanmarketing.com), [GitHub: @dejanmarketing](https://github.com/dejanmarketing), [Dejan AI](https://dejan.ai)).
-
-#### What Was the Original Work?
-Dan Petrovic introduced the breakthrough concept that hyperlink placement should not be treated as simplistic keyword matching, but as a sequence labeling / token-classification problem. He trained and released the original **`dejanseo/LinkBERT`** and **`dejanseo/LinkBERT-XL`** model weights on Hugging Face:
+### The Neural Token Classification Foundation: Dan Petrovic & DEJAN Marketing
+The neural token-classification layer of OmniLink SEO v2 builds upon the pioneering research and model weights created by Australian SEO innovator **Dan Petrovic** ([DEJAN Marketing](https://dejanmarketing.com), [GitHub: @dejanmarketing](https://github.com/dejanmarketing), [Dejan AI](https://dejan.ai)):
 * **Hugging Face Model Hub**: [`dejanseo/LinkBERT`](https://huggingface.co/dejanseo/LinkBERT)
 * **Original GitHub Repository**: [`dejanmarketing/linkBERT`](https://github.com/dejanmarketing/linkBERT)
 * **Research & Concept**: [LinkBERT by Dan Petrovic](https://dejanmarketing.com/linkbert/)
 
-In his original open-source scripts, Dan fine-tuned BERT (`bert-large-cased`) on editorial web corpora as a binary token classifier ($P(\text{link} \mid \text{token})$), identifying human-like, contextual anchor phrases inside unstructured text blocks.
+Dan Petrovic introduced the breakthrough concept of treating natural anchor text placement as a sequence labeling / binary token-classification problem ($P(\text{link} \mid \text{token})$) fine-tuned on editorial web corpora.
 
-### The Evolution: LinkBERT Pro v2.0
-To provide the global search engineering and NLP community with a complete, industry-agnostic, site-wide optimization architecture, **LinkBERT Pro** extends Dan Petrovic's foundational model into a multi-tier link intelligence platform:
+### How OmniLink SEO v2 Expands This Into a Complete Multi-Algorithm Ecosystem
+While `LinkBERT` serves as one of our candidate span detectors, **OmniLink SEO v2** expands the scope from single-passage token prediction into a complete site-wide **Internal + External + Graph + GSC + AST** architecture:
 
 ```
 ┌──────────────────────────────────────────────────────────────────────────────┐
-│                           LinkBERT Pro v2.0 Ecosystem                        │
+│                         OmniLink SEO v2 Architecture                         │
 ├──────────────────────────────────┬───────────────────────────────────────────┤
-│ Foundational Component (Dan)     │ Enterprise Extension (LinkBERT Pro v2.0)  │
+│ Neural Span Component (Petrovic) │ All-In-One System (OmniLink SEO v2.0)     │
 ├──────────────────────────────────┼───────────────────────────────────────────┤
 │ • Raw token-level link binary    │ • Batched sliding-window inference with   │
 │   probability prediction         │   compound & numeric boundary snapping    │
@@ -61,11 +63,10 @@ To provide the global search engineering and NLP community with a complete, indu
 
 ## 2. Scientific & Theoretical Foundations
 
-LinkBERT Pro is grounded in 11 peer-reviewed computer science papers, information theory formulas, and search engine patents:
+OmniLink SEO v2 is grounded in 11 peer-reviewed computer science papers, information theory formulas, and search engine patents:
 
 ### 1. Pretraining Language Models with Document Links
 * **Reference**: Yasunaga, M., Leskovec, J., & Liang, P. (2022). *LinkBERT: Pretraining Language Models with Document Links*. **ACL 2022**, pp. 8003–8016. [arXiv:2203.15827](https://arxiv.org/abs/2203.15827).
-* **Application**: Treats hyperlinks as first-class semantic relationships between document pairs, capturing multi-hop contextual relevance across web documents.
 
 ### 2. Markov Chain PageRank & Reasonable Surfer Weighting
 * **References**:
@@ -79,13 +80,11 @@ LinkBERT Pro is grounded in 11 peer-reviewed computer science papers, informatio
 * **Reference**: Haveliwala, T. H. (2002). *Topic-Sensitive PageRank*. **Proceedings of the 11th International World Wide Web Conference (WWW 2002)**, pp. 517–526.
 * **Mathematical Formulation**:
   $$\mathbf{r}_{C_k} = d \mathbf{M} \mathbf{r}_{C_k} + (1 - d) \mathbf{v}_{C_k}, \quad v_{C_k, i} = \begin{cases} \frac{1}{|C_k|} & \text{if } i \in C_k \\ 0 & \text{otherwise} \end{cases}$$
-* **Application**: Computes cluster-specific topical authority scores for every page within each detected thematic silo.
 
 ### 4. Kleinberg HITS (Hubs & Authorities)
 * **Reference**: Kleinberg, J. M. (1999). *Authoritative Sources in a Hyperlinked Environment*. **Journal of the ACM (JACM)**, 46(5), 604–632.
 * **Mathematical Formulation**:
   $$\mathbf{a}^{(t+1)} = \frac{\mathbf{A}^T \mathbf{h}^{(t)}}{\|\mathbf{A}^T \mathbf{h}^{(t)}\|_2}, \quad \mathbf{h}^{(t+1)} = \frac{\mathbf{A} \mathbf{a}^{(t+1)}}{\|\mathbf{A} \mathbf{a}^{(t+1)}\|_2}$$
-* **Application**: Separates pillar content authorities (high $\mathbf{a}$) from navigational/resource hub pages (high $\mathbf{h}$).
 
 ### 5. BM25F Field-Weighted Probabilistic Information Retrieval
 * **Reference**: Robertson, S., & Zaragoza, H. (2009). *The Probabilistic Relevance Framework: BM25 and Beyond*. **Foundations and Trends in Information Retrieval**, 3(4), 333–389.
@@ -95,18 +94,14 @@ LinkBERT Pro is grounded in 11 peer-reviewed computer science papers, informatio
 
 ### 6. Brandes Shortest-Path Betweenness Centrality
 * **Reference**: Brandes, U. (2001). *A Faster Algorithm for Betweenness Centrality*. **Journal of Mathematical Sociology**, 25(2), 163–177.
-* **Application**: Identifies structural bridge pages that connect disparate topic clusters across the site graph.
 
 ### 7. Graph Modularity & Topical Silo Cohesion
 * **Reference**: Blondel, V. D., Guillaume, J.-L., Lambiotte, R., & Lefebvre, E. (2008). *Fast unfolding of communities in large networks*. **Journal of Statistical Mechanics: Theory and Experiment**, 2008(10), P10008.
-* **Mathematical Formulation**:
-  $$Q = \frac{1}{2m} \sum_{i,j} \left[ A_{ij} - \frac{k_i k_j}{2m} \right] \delta(c_i, c_j)$$
 
 ### 8. Anchor Text Diversity via Shannon Entropy
 * **Reference**: Shannon, C. E. (1948). *A Mathematical Theory of Communication*. **Bell System Technical Journal**, 27(3), 379–423.
 * **Mathematical Formulation**:
   $$H(X) = - \sum_{i=1}^n P(x_i) \log_2 P(x_i)$$
-* **Application**: Evaluates combined existing + proposed inbound anchor distributions per target page and automatically generates partial-match and topical variations when $H(X) < 1.5$ bits.
 
 ### 9. TrustRank & Multi-Vertical E-E-A-T Seed Proximity
 * **References**:
@@ -122,11 +117,11 @@ flowchart TD
     A["1. Multi-Format AST Ingestion (HTML, MD/YAML, MDX, Next.js .tsx, Astro, JSON-LD)"] --> B["2. Reasonable Surfer PageRank, HITS, Click Depth & Bridge Centrality"]
     B --> C["3. Hybrid Louvain Community Detection & Haveliwala Topic-Sensitive PageRank"]
     C --> D["4. GSC Striking-Distance Query Injection & Cannibalization Matrix"]
-    D --> E["5. Batched LinkBERT Neural Classifier + BM25F + Dense Bi-Encoder Retrieval"]
+    D --> E["5. BM25F + Dense Bi-Encoder + Batched LinkBERT Neural Classifier"]
     E --> F["6. Compound/Numeric Boundary Snapping & Dynamic Corpus IDF Filtering"]
     F --> G["7. 10-Vertical TrustRank External Citation Engine & Outbound Security Auditor"]
     G --> H["8. 6-Tab Executive Excel Workbook & 5-Tab Interactive HTML5 Dashboard"]
-    H --> I["9. 6-Specialist Automated Quality Gate (linkbert verify)"]
+    H --> I["9. 6-Specialist Automated Quality Gate (omnilink verify)"]
     I --> J["10. AST-Safe File Applier with Atomic .bak Rollback"]
 ```
 
@@ -136,74 +131,68 @@ flowchart TD
 
 ```bash
 # Clone the repository
-git clone https://github.com/muyiwaadekojede/LinkBERT-Pro.git
-cd LinkBERT-Pro
+git clone https://github.com/muyiwaadekojede/OmniLink-SEO-v2.git
+cd OmniLink-SEO-v2
 
 # Create a virtual environment
 python -m venv .venv
 source .venv/bin/activate  # On Windows: .venv\Scripts\activate
 
-# Install dependencies and CLI
+# Install dependencies and CLI (registers both `omnilink` and `linkbert` commands)
 pip install -e .
 ```
 
 Verify your installation:
 ```bash
-linkbert doctor
+omnilink doctor
 ```
 
 ---
 
 ## 5. CLI Usage & Workflows
 
+*(Note: Both `omnilink` and `linkbert` CLI commands are registered and interchangeable.)*
+
 ### 1. Scan and Index a Website or Local Codebase
-Scan a live website via XML sitemaps or rendered DOM:
 ```bash
-linkbert scan https://example.com --max-pages 500 --index .my_index
-```
-Or index a local codebase (`HTML`, `Markdown/MDX`, `Next.js .tsx/.jsx`, `Astro .astro`):
-```bash
-linkbert scan ./my-nextjs-app --index .my_index
+omnilink scan https://example.com --max-pages 500 --index .my_index
+# Or scan a local Next.js / Astro / Markdown / HTML codebase:
+omnilink scan ./my-nextjs-app --index .my_index
 ```
 
 ### 2. Graph Topology, PageRank, Click Depth & HITS Audit
-Compute Reasonable Surfer PageRank, BFS click depth from `/`, Kleinberg HITS Hub/Authority scores, and orphan/dead-end pages:
 ```bash
-linkbert graph --index .my_index
+omnilink graph --index .my_index
 ```
 
 ### 3. Topic Clusters & Topic-Sensitive PageRank
-Discover topical silos using `url_hierarchy`, `louvain`, `label_propagation`, or `hybrid` (graph + embeddings):
 ```bash
-linkbert clusters --index .my_index --method hybrid
+omnilink clusters --index .my_index --method hybrid
 ```
 
-### 4. Generate Link Recommendations with GSC Intelligence
-Generate high-confidence internal and external links powered by GSC striking-distance queries:
+### 4. Generate Internal & External Link Recommendations with GSC Intelligence
 ```bash
-linkbert suggest --index .my_index --gsc search_console_performance.csv --min-score 0.35 --rerank
+omnilink suggest --index .my_index --gsc search_console_performance.csv --min-score 0.35 --rerank
 ```
 
 ### 5. Run the 6-Specialist Automated Quality Gate
-Verify 0 anchor truncations, 0 self-links, 0 placeholder URLs, and 100% topical silo consistency:
 ```bash
-linkbert verify --index .my_index
+omnilink verify --index .my_index
 ```
 
 ### 6. AST-Safe File Placement & Rollback
-Safely apply approved links directly to HTML, Markdown, or MDX files:
 ```bash
-linkbert apply --index .my_index --dry-run --diff
-linkbert apply --index .my_index --min-score 0.45
-linkbert rollback --index .my_index
-linkbert commit --index .my_index
+omnilink apply --index .my_index --dry-run --diff
+omnilink apply --index .my_index --min-score 0.45
+omnilink rollback --index .my_index
+omnilink commit --index .my_index
 ```
 
 ---
 
 ## 6. Deliverables: 6-Tab Master Excel Workbook & 5-Tab HTML5 App
 
-LinkBERT Pro exports a complete strategic link architecture workbook (`link_architecture_master.xlsx`):
+OmniLink SEO v2 exports a complete strategic link architecture workbook (`link_architecture_master.xlsx`):
 
 | Tab | Sheet Name | Contents |
 |---|---|---|
@@ -218,17 +207,15 @@ LinkBERT Pro exports a complete strategic link architecture workbook (`link_arch
 
 ## 7. Academic Citations (BibTeX)
 
-If you use LinkBERT Pro or the underlying LinkBERT model in your research, academic work, or production software, please cite both the foundational work and the Pro framework:
-
 ```bibtex
-@software{adekojede2026linkbertpro,
+@software{adekojede2026omnilinkseo,
   author       = {Adekojede, Muyiwa and Petrovic, Dan},
-  title        = {LinkBERT Pro: Enterprise-Grade SEO Internal and External Link Architecture, Graph Simulation, and Citation Intelligence Engine},
+  title        = {OmniLink SEO v2: Enterprise-Grade Internal and External Link Optimization, Graph Simulation, and Citation Intelligence Engine},
   version      = {2.0.0},
   year         = {2026},
   publisher    = {GitHub},
   journal      = {GitHub repository},
-  howpublished = {\url{https://github.com/muyiwaadekojede/LinkBERT-Pro}}
+  howpublished = {\url{https://github.com/muyiwaadekojede/OmniLink-SEO-v2}}
 }
 
 @misc{petrovic2022linkbert,
@@ -337,4 +324,4 @@ If you use LinkBERT Pro or the underlying LinkBERT model in your research, acade
 
 Distributed under the **MIT License**. See [`LICENSE`](LICENSE) for full details.
 
-*Copyright (c) 2026 Muyiwa Adekojede. Original LinkBERT Model & Concept Copyright (c) Dan Petrovic (DEJAN Marketing).*
+*Copyright (c) 2026 Muyiwa Adekojede. Neural LinkBERT Component Copyright (c) Dan Petrovic (DEJAN Marketing).*

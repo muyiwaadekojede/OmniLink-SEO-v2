@@ -1,7 +1,7 @@
 [project]
-name = "linkbert-pro"
+name = "omnilink-seo-v2"
 version = "2.0.0"
-description = "LinkBERT Pro: Enterprise-grade SEO Internal & External Link Architecture, Graph Simulation, and Citation Intelligence Engine"
+description = "OmniLink SEO v2: Enterprise-grade Internal & External Link Optimization Engine — PageRank, HITS, Topic Silos, BM25F, LinkBERT NLP, E-E-A-T Citations & Google Search Console Intelligence"
 readme = "README.md"
 license = { text = "MIT" }
 requires-python = ">=3.10"
@@ -12,16 +12,19 @@ authors = [
 keywords = [
   "seo",
   "internal-links",
+  "internal-linking",
+  "external-links",
   "link-building",
+  "link-graph",
   "pagerank",
   "hits",
   "bm25f",
   "graph-theory",
   "nlp",
-  "bert",
   "linkbert",
   "eeat",
-  "citation-intelligence"
+  "google-search-console",
+  "technical-seo"
 ]
 classifiers = [
   "Development Status :: 5 - Production/Stable",
@@ -47,12 +50,13 @@ dependencies = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/muyiwaadekojede/LinkBERT-Pro"
-Repository = "https://github.com/muyiwaadekojede/LinkBERT-Pro"
-"Original Research & Model" = "https://huggingface.co/dejanseo/LinkBERT"
-"Original Creator" = "https://dejanmarketing.com"
+Homepage = "https://github.com/muyiwaadekojede/OmniLink-SEO-v2"
+Repository = "https://github.com/muyiwaadekojede/OmniLink-SEO-v2"
+"LinkBERT Neural Component" = "https://huggingface.co/dejanseo/LinkBERT"
+"Original LinkBERT Creator" = "https://dejanmarketing.com"
 
 [project.scripts]
+omnilink = "lb.cli:main"
 linkbert = "lb.cli:main"
 
 [build-system]
